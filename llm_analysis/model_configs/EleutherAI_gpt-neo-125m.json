@@ -1,0 +1,10 @@
+{
+    "name": "EleutherAI_gpt-neo-125m",
+    "num_layers": 12,
+    "n_head": 12,
+    "hidden_dim": 768,
+    "vocab_size": 50257,
+    "max_seq_len": 2048,
+    "ffn_embed_dim": 3072,
+    "model_type": "gpt_neo"
+}

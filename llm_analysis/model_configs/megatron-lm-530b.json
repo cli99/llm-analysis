@@ -1,0 +1,9 @@
+{
+    "name": "megatron-lm-530b",
+    "max_seq_len": 2048,
+    "num_layers": 105,
+    "n_head": 128,
+    "hidden_dim": 20480,
+    "vocab_size": 50272,
+    "ffn_embed_dim": 81920
+}

@@ -1,0 +1,10 @@
+{
+    "name": "lmsys_vicuna-7b-delta-v0",
+    "num_layers": 32,
+    "n_head": 32,
+    "hidden_dim": 4096,
+    "vocab_size": 32001,
+    "max_seq_len": 2048,
+    "ffn_embed_dim": 16384,
+    "model_type": "llama"
+}

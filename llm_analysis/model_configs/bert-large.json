@@ -1,0 +1,9 @@
+{
+    "name": "bert-large",
+    "max_seq_len": 512,
+    "num_layers": 24,
+    "n_head": 16,
+    "hidden_dim": 1024,
+    "vocab_size": 30522,
+    "ffn_embed_dim": 4096
+}

@@ -1,0 +1,11 @@
+{
+    "name": "v100-pcie-32gb",
+    "mem_per_GPU_in_GB": 32,
+    "hbm_bandwidth_in_GB_per_sec": 900,
+    "intra_node_bandwidth_in_GB_per_sec": 150,
+    "intra_node_min_message_latency": 8e-06,
+    "peak_fp16_TFLOPS": 112,
+    "peak_i8_TFLOPS": 224,
+    "peak_i4_TFLOPS": 448,
+    "inter_node_bandwidth_in_GB_per_sec": 200
+}

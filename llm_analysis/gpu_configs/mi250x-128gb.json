@@ -1,0 +1,11 @@
+{
+    "name": "mi250x-128gb",
+    "mem_per_GPU_in_GB": 128,
+    "hbm_bandwidth_in_GB_per_sec": 3200,
+    "intra_node_bandwidth_in_GB_per_sec": 400,
+    "intra_node_min_message_latency": 8e-06,
+    "peak_fp16_TFLOPS": 383,
+    "peak_i8_TFLOPS": 766,
+    "peak_i4_TFLOPS": 1532,
+    "inter_node_bandwidth_in_GB_per_sec": 200
+}

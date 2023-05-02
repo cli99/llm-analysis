@@ -1,0 +1,9 @@
+{
+    "name": "megatron-lm-175b",
+    "max_seq_len": 2048,
+    "num_layers": 96,
+    "n_head": 96,
+    "hidden_dim": 12288,
+    "vocab_size": 50272,
+    "ffn_embed_dim": 49152
+}

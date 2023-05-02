@@ -1,0 +1,10 @@
+{
+    "name": "dslim_bert-base-NER",
+    "num_layers": 12,
+    "n_head": 12,
+    "hidden_dim": 768,
+    "vocab_size": 28996,
+    "max_seq_len": 512,
+    "ffn_embed_dim": 3072,
+    "model_type": "bert"
+}

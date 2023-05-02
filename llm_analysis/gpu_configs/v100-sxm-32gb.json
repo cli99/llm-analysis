@@ -1,0 +1,11 @@
+{
+    "name": "v100-sxm-32gb",
+    "mem_per_GPU_in_GB": 32,
+    "hbm_bandwidth_in_GB_per_sec": 900,
+    "intra_node_bandwidth_in_GB_per_sec": 150,
+    "intra_node_min_message_latency": 8e-06,
+    "peak_fp16_TFLOPS": 125,
+    "peak_i8_TFLOPS": 250,
+    "peak_i4_TFLOPS": 500,
+    "inter_node_bandwidth_in_GB_per_sec": 200
+}

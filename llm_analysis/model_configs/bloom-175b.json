@@ -1,0 +1,8 @@
+{
+    "name": "bloom-175b",
+    "num_layers": 96,
+    "n_head": 96,
+    "hidden_dim": 12288,
+    "vocab_size": 250880,
+    "ffn_embed_dim": 49152
+}

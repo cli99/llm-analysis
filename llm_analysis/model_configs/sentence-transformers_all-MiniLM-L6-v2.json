@@ -1,0 +1,10 @@
+{
+    "name": "sentence-transformers_all-MiniLM-L6-v2",
+    "num_layers": 6,
+    "n_head": 12,
+    "hidden_dim": 384,
+    "vocab_size": 30522,
+    "max_seq_len": 512,
+    "ffn_embed_dim": 1536,
+    "model_type": "bert"
+}

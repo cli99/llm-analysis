@@ -1,0 +1,10 @@
+{
+    "name": "EleutherAI_gpt-j-6b",
+    "num_layers": 28,
+    "n_head": 16,
+    "hidden_dim": 4096,
+    "vocab_size": 50400,
+    "max_seq_len": 2048,
+    "ffn_embed_dim": 16384,
+    "model_type": "gptj"
+}

@@ -1,0 +1,10 @@
+{
+    "name": "bigscience_test-bloomd-6b3",
+    "num_layers": 30,
+    "n_head": 32,
+    "hidden_dim": 4096,
+    "vocab_size": 250880,
+    "max_seq_len": null,
+    "ffn_embed_dim": 16384,
+    "model_type": "bloom"
+}

@@ -1,0 +1,37 @@
+
+----------------------------------------------Summary-----------------------------------------------
+batch_size_per_gpu: 2
+max_batch_size_per_gpu: 7
+gradient_accumulation_steps: 1
+global_batch_size: 1536
+dp_size: 768
+tp_size: 1
+pp_size: 1
+sp_size: 1
+ds_zero: STAGE_3
+total_num_gpus: 768
+seq_len: 2048
+total_num_tokens: 300.0 G
+num_params_total: 174.56 G
+activation_recomputation: FULL
+achived_flops: 88.0
+flops_efficiency: 0.28205128205128205
+hbm_memory_efficiency: 1
+num_flops_total_per_micro_batch: 5878.44 T
+weight_memory_per_gpu: 1.69 GB
+gradient_memory_per_gpu: 452.98 MB
+optimizer_state_memory_per_gpu: 3.62 GB
+activation_memory_bs1: 4.83 GB
+activation_memory_per_gpu: 9.66 GB
+latency_per_micro_batch: 1.11 minutes
+latency_fwd: 16.73 s
+latency_fwd_attn: 5.85 s
+latency_fwd_mlp: 10.8 s
+latency_fwd_layernorm: 24.86 ms
+latency_fwd_tp_comm: 0.0 us
+latency_fwd_input_embedding: 794.52 us
+latency_fwd_output_embedding_loss: 57.51 ms
+latency_per_iter: 1.11 minutes
+total_training_latency: 73.73 days
+gpu_hours: 1359052
+----------------------------------------------------------------------------------------------------

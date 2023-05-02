@@ -1,0 +1,44 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: requirements-txt-fixer
+      - id: check-ast
+      - id: debug-statements
+      - id: check-toml
+      - id: check-json
+      - id: check-xml
+      - id: check-added-large-files
+        args: [— maxkb=100]
+  - repo: https://github.com/pycqa/flake8
+    rev: 4.0.1
+    hooks:
+      - id: flake8
+        args:
+          [
+            '--ignore=E,F403,F405,F541,F841,W',
+            '--select=E9,F,W6',
+            '--per-file-ignores=__init__.py:F401',
+          ]
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.1.0
+    hooks:
+      - id: codespell
+        args: [
+            # Do not check files that are automatically generated
+            '--skip=docs/Gemfile.lock,tests/unit/gpt2-merges.txt,tests/unit/gpt2-vocab.json',
+            '--ignore-regex=\\n', # Do not count the 'n' in an escaped newline as part of a word
+            '--ignore-words-list=unsupport', # Word used in error messages that need rewording
+            --check-filenames,
+            --check-hidden,
+          ]
+  - repo: https://gitlab.com/daverona/pre-commit-cpp
+    rev: 0.8.0
+    hooks:
+      - id: clang-format # formatter of C/C++ code based on a style guide: LLVM, Google, Chromium, Mozilla, and WebKit available
+        args: []

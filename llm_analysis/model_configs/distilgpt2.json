@@ -1,0 +1,10 @@
+{
+    "name": "distilgpt2",
+    "num_layers": 6,
+    "n_head": 12,
+    "hidden_dim": 768,
+    "vocab_size": 50257,
+    "max_seq_len": 1024,
+    "ffn_embed_dim": 3072,
+    "model_type": "gpt2"
+}

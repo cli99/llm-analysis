@@ -1,0 +1,37 @@
+
+----------------------------------------------Summary-----------------------------------------------
+batch_size_per_gpu: 1
+seq_len: 512
+tp_size: 1
+pp_size: 1
+num_tokens_to_generate: 32
+use_kv_cache: True
+kv_cache_memory_per_gpu: 142.61 MB
+kv_cache_latency: 139.88 us
+layernorm_dtype_bytes: 2
+embedding_memory_per_gpu: 262.14 MB
+weight_memory_per_gpu: 6.7 GB
+prefill_max_batch_size_per_gpu: 42
+prefill_activation_memory_per_gpu: 1.74 GB
+prefill_num_flops_fwd_total: 6.87 T
+decode_max_batch_size_per_gpu: 505
+decode_activation_memory_per_gpu: 2.36 MB
+decode_num_flops_fwd_total: 13.15 G
+prefill_latency: 11.4 ms
+prefill_latency_fwd_attn: 3.74 ms
+prefill_latency_fwd_mlp: 7.05 ms
+prefill_latency_fwd_layernorm: 263.3 us
+prefill_latency_fwd_tp_comm: 0.0 us
+prefill_latency_fwd_input_embedding: 128.56 us
+prefill_latency_fwd_output_embedding_loss: 215.09 us
+decode_latency: 3.43 ms
+decode_latency_fwd_attn: 1.05 ms
+decode_latency_fwd_mlp: 2.11 ms
+decode_latency_fwd_layernorm: 0.51 us
+decode_latency_fwd_tp_comm: 0.0 us
+decode_latency_fwd_input_embedding: 128.56 us
+decode_latency_fwd_output_embedding_loss: 0.42 us
+total_decode_latency: 109.76 ms
+total_latency: 121.16 ms
+total_per_token_latency: 3.79 ms
+----------------------------------------------------------------------------------------------------

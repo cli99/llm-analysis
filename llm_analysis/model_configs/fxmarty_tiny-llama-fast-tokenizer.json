@@ -1,0 +1,10 @@
+{
+    "name": "fxmarty_tiny-llama-fast-tokenizer",
+    "num_layers": 2,
+    "n_head": 4,
+    "hidden_dim": 16,
+    "vocab_size": 32000,
+    "max_seq_len": 2048,
+    "ffn_embed_dim": 64,
+    "model_type": "llama"
+}

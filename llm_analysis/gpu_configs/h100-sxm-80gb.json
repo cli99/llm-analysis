@@ -1,0 +1,11 @@
+{
+    "name": "h100-sxm-80gb",
+    "mem_per_GPU_in_GB": 80,
+    "hbm_bandwidth_in_GB_per_sec": 3350,
+    "intra_node_bandwidth_in_GB_per_sec": 450,
+    "intra_node_min_message_latency": 8e-06,
+    "peak_fp16_TFLOPS": 1979,
+    "peak_i8_TFLOPS": 3958,
+    "peak_i4_TFLOPS": 7916,
+    "inter_node_bandwidth_in_GB_per_sec": 200
+}

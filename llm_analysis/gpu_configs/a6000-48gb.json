@@ -1,0 +1,11 @@
+{
+    "name": "a6000-48gb",
+    "mem_per_GPU_in_GB": 48,
+    "hbm_bandwidth_in_GB_per_sec": 768,
+    "intra_node_bandwidth_in_GB_per_sec": 56.25,
+    "intra_node_min_message_latency": 8e-06,
+    "peak_fp16_TFLOPS": 154.8,
+    "peak_i8_TFLOPS": 309.6,
+    "peak_i4_TFLOPS": 619.2,
+    "inter_node_bandwidth_in_GB_per_sec": 200
+}

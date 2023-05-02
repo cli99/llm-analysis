@@ -1,0 +1,9 @@
+{
+    "name": "test-13b",
+    "max_seq_len": 2048,
+    "num_layers": 40,
+    "n_head": 40,
+    "hidden_dim": 5120,
+    "vocab_size": 50272,
+    "ffn_embed_dim": 20480
+}

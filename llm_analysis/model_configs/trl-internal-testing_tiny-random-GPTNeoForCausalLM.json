@@ -1,0 +1,10 @@
+{
+    "name": "trl-internal-testing_tiny-random-GPTNeoForCausalLM",
+    "num_layers": 4,
+    "n_head": 4,
+    "hidden_dim": 32,
+    "vocab_size": 1024,
+    "max_seq_len": 512,
+    "ffn_embed_dim": 128,
+    "model_type": "gpt_neo"
+}

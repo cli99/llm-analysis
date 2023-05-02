@@ -1,0 +1,10 @@
+{
+    "name": "facebook_opt-1.3b",
+    "num_layers": 24,
+    "n_head": 32,
+    "hidden_dim": 2048,
+    "vocab_size": 50272,
+    "max_seq_len": 2048,
+    "ffn_embed_dim": 8192,
+    "model_type": "opt"
+}

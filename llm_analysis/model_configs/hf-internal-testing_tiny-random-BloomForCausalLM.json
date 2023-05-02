@@ -1,0 +1,10 @@
+{
+    "name": "hf-internal-testing_tiny-random-BloomForCausalLM",
+    "num_layers": 5,
+    "n_head": 4,
+    "hidden_dim": 32,
+    "vocab_size": 1024,
+    "max_seq_len": null,
+    "ffn_embed_dim": 128,
+    "model_type": "bloom"
+}
