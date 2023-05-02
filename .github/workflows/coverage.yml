@@ -22,7 +22,7 @@ jobs:
 
       - name: Generate Report
         run: |
-          poetry run coverage run -m pytest
+          poetry run pytest --cov .
 
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v3
