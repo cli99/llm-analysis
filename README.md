@@ -60,17 +60,17 @@ Check the example use cases. With llm-analysis, you can do such analysis in minu
 
 To integrate llm-analysis in your code, use the `LLMAnalysis` class. Refer to doc [LLMAnalysis](https://llm-analysis.readthedocs.io/) for details.
 
-`LLMAnalysis` is constructed with flops and memory efficiency numbers and the following [configuration classes]():
+`LLMAnalysis` is constructed with flops and memory efficiency numbers and the following [configuration classes](https://llm-analysis.readthedocs.io/en/latest/config.html):
 
 - `ModelConfig` covers model information, i.e. max sequence length, number of transformer layers, number of attention heads, hidden dimension, vocabulary size
 - `GPUConfig` covers GPU compute and memory specifications
 - `DtypeConfig` covers the number of bits used for the model weight, activation, and embedding
 - `ParallelismConfig` covers Tensor Parallelism (`tp`), Pipeline Parallelism (`pp`), Sequence Parallelism (`sp`), and Data Parallelism (`dp`).
 
-Then `LLMAnalysis` can be queried with different arguments through the [`training`]() and [`inference`]() methods.
+Then `LLMAnalysis` can be queried with different arguments through the [training](https://llm-analysis.readthedocs.io/en/latest/analysis.html#llm_analysis.analysis.LLMAnalysis.training) and [inference](https://llm-analysis.readthedocs.io/en/latest/analysis.html#llm_analysis.analysis.LLMAnalysis.inference) methods.
 ### Using the Entry Point Functions for Command Line
 
-llm-analysis provides two entry functions,`train` and `infer`, for ease of use through the command line interface. Run
+llm-analysis provides two entry functions, [train](https://llm-analysis.readthedocs.io/en/latest/analysis.html#llm_analysis.analysis.train) and [infer](https://llm-analysis.readthedocs.io/en/latest/analysis.html#llm_analysis.analysis.infer), for ease of use through the command line interface. Run
 
 ```sh
 python -m llm_analysis.analysis train --help
