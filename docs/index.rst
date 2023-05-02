@@ -8,7 +8,7 @@ Analysis
 ------------
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
 
    analysis
 
