@@ -28,7 +28,7 @@ llm-analysis provides details about time and memory, as presented below.
 The table below shows the latency per iteration comparison between the original paper values, using reported TFLOPS, and ideal FLOPS and memory efficiency (by setting `--flops_efficiency 1 --hbm_memory_efficiency 1` in the script, also removing the `achieved_tflops` arg.).
 The output summaries with ideal efficiency are in [outputs_train_ideal](outputs_train_ideal) directory.
 
-| total num. of GPUs | paper-reported latency per iter. (m) | llm-analysis latency per iter. using reported TFLOPS (m) | llm-analysis ideal latency per iter. (s) | actual FLOPS efficiency |
+| total num. of GPUs | paper-reported latency per iter. (s) | llm-analysis latency per iter. using reported TFLOPS (s) | llm-analysis ideal latency per iter. (s) | actual FLOPS efficiency |
 |--------------------|--------------------------------------|----------------------------------------------------------|------------------------------------------|-------------------------|
 | 2240               | 60.1                                 | 60.0                                                     | 24.23                                    | 0.40                    |
 | 2800               | 50.2                                 | 49.98                                                    | 19.38                                    | 0.39                    |
