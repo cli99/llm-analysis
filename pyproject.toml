@@ -18,6 +18,10 @@ pytest = "^7.3.1"
 coverage = {extras = ["toml"], version = "^7.2.5"}
 sphinx = "^7.0.0"
 sphinx-autodoc-typehints = "^1.23.0"
+pytest-cov = "^4.0.0"
+
+[tool.coverage.run]
+omit = [".*", "*/site-packages/*"]
 
 [build-system]
 requires = ["poetry-core"]
