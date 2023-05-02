@@ -61,7 +61,7 @@ We can quantitatively see from the new time breakdown below that the time portio
 
 ### Using H100 GPU
 
-In this analysis, we show how the training performance changes when different GPUs. To list all predefined GPUs, run `python -m ll`).
+In this analysis, we show how the training performance changes when different GPUs are used. To list all predefined GPUs, run `python -m llm_analysis.config list_gpu_configs`).
 Setting `gpu_name` to [h100-sxm-80gb](../../llm_analysis/gpu_configs/h100-sxm-80gb.json) in the [run_train.sh](run_train.sh) script uses H100-SXM 80GB GPUs. The corresponding output summaries are in `outputs_train_h100` directory.
 
 The GPU-hours are reduced by `84 %` as expected, as the training is compute-bound and `h100-sxm-80gb` has a peak FP16 TFLOPS of `1979` compared to `312` for [a100-sxm-80gb](../../llm_analysis/gpu_configs/h100-sxm-80gb.json).
