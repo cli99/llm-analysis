@@ -4,8 +4,8 @@
     "hbm_bandwidth_in_GB_per_sec": 2000,
     "intra_node_bandwidth_in_GB_per_sec": 300,
     "intra_node_min_message_latency": 8e-06,
-    "peak_fp16_TFLOPS": 1513,
-    "peak_i8_TFLOPS": 3026,
-    "peak_i4_TFLOPS": 6052,
+    "peak_fp16_TFLOPS": 756,
+    "peak_i8_TFLOPS": 1513,
+    "peak_i4_TFLOPS": 3026,
     "inter_node_bandwidth_in_GB_per_sec": 200
 }

@@ -14,7 +14,7 @@ seq_len: 2048
 total_num_tokens: 1.4 T
 num_params_total: 64.69 G
 activation_recomputation: SELECTIVE
-achived_flops: 989.5
+achived_flops: 494.5
 flops_efficiency: 0.5
 hbm_memory_efficiency: 0.9
 num_flops_total_per_micro_batch: 6710.8 T
@@ -23,15 +23,15 @@ gradient_memory_per_gpu: 2.01 GB
 optimizer_state_memory_per_gpu: 16.11 GB
 activation_memory_bs1: 6.21 GB
 activation_memory_per_gpu: 49.66 GB
-latency_per_micro_batch: 105.97 ms
-latency_fwd: 58.35 ms
-latency_fwd_attn: 12.5 ms
-latency_fwd_mlp: 22.22 ms
+latency_per_micro_batch: 212.05 ms
+latency_fwd: 94.2 ms
+latency_fwd_attn: 25.01 ms
+latency_fwd_mlp: 44.47 ms
 latency_fwd_layernorm: 445.17 us
 latency_fwd_tp_comm: 20.88 ms
 latency_fwd_input_embedding: 1.22 ms
-latency_fwd_output_embedding_loss: 1.09 ms
-latency_per_iter: 27.6 minutes
-total_training_latency: 3.26 days
-gpu_hours: 160130
+latency_fwd_output_embedding_loss: 2.17 ms
+latency_per_iter: 55.22 minutes
+total_training_latency: 6.52 days
+gpu_hours: 320423
 ----------------------------------------------------------------------------------------------------
