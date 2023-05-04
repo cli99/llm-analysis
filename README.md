@@ -79,22 +79,35 @@ python -m llm_analysis.analysis train --help
 ```sh
 python -m llm_analysis.analysis infer --help
 ```
-to check the options.
+to check the options or read the linked doc. Refer to the [examples](examples) to see how they are used.
 
 `train` and `infer` use the pre-defined name-to-configuration mappings (`model_configs`, `gpu_configs`, `dtype_configs`) and other user-input arguments to construct the `LLMAnalysis` and do the query.
+
 The pre-defined mappings are populated at the runtime from the model, GPU, and data type configuration `json` files under [model_configs](llm_analysis/model_configs), [gpu_configs](llm_analysis/gpu_configs), and [dtype_configs](llm_analysis/dtype_configs). To add a new model, GPU or data type to the mapping for query, just add a `json` description file to the corresponding folder.
 
 llm-analysis also supports retrieving `ModelConfig` from Hugging Face with the model name (thus no need to add the model configuration to the `model_configs` folder). E.g. use [`EleutherAI/gpt-neox-20b`](https://huggingface.co/EleutherAI/gpt-neox-20b) as `model_name` when calling the `train` or `infer` entry functions.
 
-A list of handy commands is provided to query against the pre-defined mappings as well as Hugging Face, or to dump configurations, for example,
+A list of handy commands is provided to query against the pre-defined mappings as well as Hugging Face, or to dump configurations. Run ```python -m llm_analysis.config --help``` for details.
+
+Some examples:
 
 ```sh
-python -m llm_analysis.config get_model_config_by_name decapoda-research/llama-7b-hf
-
+python -m llm_analysis.config get_model_config_by_name EleutherAI/gpt-neox-20b
 ```
-gets the `ModelConfig` from the populated mapping by name, if not found, tries to get it from HuggingFace.
+gets the `ModelConfig` from the populated mapping by name, if not found, llm-analysis tries to get it from HuggingFace.
 
-Run ```python -m llm_analysis.config --help``` for details.
+Note that LLaMA models need at least `transformers-4.28.1` to retrieve, either update to a later `transformers` library, or use the predefined `ModelConfig` for LLaMA models (`/` in model names are replaced with `_`).
+
+```sh
+python -m llm_analysis.config list_gpu_configs
+```
+lists the names of all predefined GPU configurations, then you can query with
+
+```sh
+python -m llm_analysis.config get_gpu_config_by_name a100-sxm-80gb
+```
+to show the corresponding `GPUConfig`.
+
 
 ### How to Set FLOPS and Memory Efficiency
 
