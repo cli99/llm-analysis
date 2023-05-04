@@ -111,7 +111,7 @@ to show the corresponding `GPUConfig`.
 
 ### How to Set FLOPS and Memory Efficiency
 
-Setting flops and memory efficiency to `1` (default) gives the lower bound of training or inference latency, as it assumes the peak hardware perforamnce (which is never the case).
+Setting flops and memory efficiency to `1` (default) gives the lower bound of training or inference latency, as it assumes the peak hardware performance (which is never the case).
 A close-to-reality flops or memory efficiency can be found by benchmarking and profiling using the input dimensions in the model (providing such scripts is on the [TODOs](#todos-stay-tuned-radio) list).
 
 If one has to make assumptions, for flops efficiency, literature reports up to `0.5` for large scale model training, and up to `0.7` for inference; `0.9` can be an aggressive target for memory efficiencies.
