@@ -105,7 +105,7 @@ Note that to leverage INT4 (or INT8) GEMM, both weights and activations need to 
 | LLaMA-7B             | 22.41     | 5.9     | 11.4    | 22.41    | 11.4    |
 | LLaMA-13B            | 43.1      | 11.2    | 21.83   | 43.1     | 21.83   |
 | LLaMA-33B            | 107.74    | 27.69   | 54.38   | 107.74   | 54.38   |
-| LLaMA-65B            | 113.33    | 55.2    | 108.83  | 216.08   | 108.83  |
+| LLaMA-65B            | 113.33 (tp_size=2)   | 55.2  (tp_size=1)  | 108.83 (tp_size=1) | 216.08 (tp_size=1)  | 108.83 (tp_size=1) |
 
 - decode latency
 
