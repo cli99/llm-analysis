@@ -114,7 +114,7 @@ Note that to leverage INT4 (or INT8) GEMM, both weights and activations need to 
 | LLaMA-7B            | 6.73      | 1.78    | 1.85    | 1.99     | 3.43    |
 | LLaMA-13B           | 12.94     | 3.36    | 3.47    | 3.69     | 6.55    |
 | LLaMA-33B           | 32.36     | 8.25    | 8.46    | 8.89     | 16.28   |
-| LLaMA-65B           | 33.85     | 16.41   | 16.76   | 17.47    | 32.56   |
+| LLaMA-65B           | 33.85 (tp_size=2)    | 16.41  (tp_size=1) | 16.76 (tp_size=1)  | 17.47 (tp_size=1)    | 32.56 (tp_size=1)  |
 
 ## References
 
