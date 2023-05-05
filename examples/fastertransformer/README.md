@@ -14,7 +14,7 @@ For inference with `512` context length, batch size `1` and `10` generated token
 [run_infer.sh](run_infer.sh) reproduces the setup used in the blog post and the latency analyses are presented below.
 
 
-Note that as the blog described, the highest efficiency numbers observed in profiling are taken for `flops_efficiency` and `hbm_memory_efficiency`; different parts of the model achieve different compuate or memory efficiency, e.g., the one of the MLP gets `0.72` for `flops_efficency` while the attention projections only achieves 0.54. Taking the lowest observed in profiling gives a `safer lower-bound` of model latency.
+Note that as the blog described, the highest efficiency numbers observed in profiling are taken for `flops_efficiency` and `hbm_memory_efficiency`; different parts of the model achieve different compute or memory efficiency, e.g., the one of the MLP gets `0.72` for `flops_efficiency` while the attention projections only achieves 0.54. Taking the lowest observed in profiling gives a `safer lower-bound` of model latency.
 
 - 1 GPU (no tensor parallelism):
 

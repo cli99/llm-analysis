@@ -307,7 +307,7 @@ class LLMAnalysis:
     ) -> float:
         """Get the memory (in bytes) required  to store the weights of a
         transformer layer, given the number of parameters in a transformer
-        layer, the data type used for the weights, the tensor parllaelism size,
+        layer, the data type used for the weights, the tensor parallelism size,
         and the DeepSpeed ZeRO stage. WIth ZeRO Stage 3, the weights are
         sharded across data parallel groups.
 
@@ -333,10 +333,10 @@ class LLMAnalysis:
         """Get the memory (in bytes) required  to store the optimizer states of
         a transformer layer, given the number of parameters in a transformer
         layer, the data type used for the optimizer state (FP32), the tensor
-        parllaelism size, and the DeepSpeed ZeRO stage. Assuming using mixed
+        parallelism size, and the DeepSpeed ZeRO stage. Assuming using mixed
         precision training and training with the Adam optimizer, the optimizer
         states include the full-precision (4 bytes) copies of the weights and
-        graidents in 32 bit float format for numerical stability, the momentum
+        gradients in 32 bit float format for numerical stability, the momentum
         and the variance which are in FP32. With ZeRO stage 1 and above, the
         optimizer states are sharded across data parallel groups.
 
@@ -363,7 +363,7 @@ class LLMAnalysis:
         """Get the memory (in bytes) required  to store the gradients of a
         transformer layer, given the number of parameters in a transformer
         layer, the data type used for the gradients (FP32), the tensor
-        parllaelism size, and the DeepSpeed ZeRO stage. The gradients use the
+        parallelism size, and the DeepSpeed ZeRO stage. The gradients use the
         same data type as the model weights. With ZeRO stage 2 and above, the
         gradients are sharded across the data parallel group.
 
@@ -387,7 +387,7 @@ class LLMAnalysis:
     def get_memory_embedding(self, dtype_bytes: int = BYTES_FP32) -> float:
         """Get the memory (in bytes) required  to store the embedding layer,
         given the number of parameters in the embedding layer, the data type
-        (defaults to FP32) used for the weights, and the tensor parllaelism
+        (defaults to FP32) used for the weights, and the tensor parallelism
         size (Megatron-LM partitions the embedding layer across the tensor
         parallel groups).
 
@@ -421,7 +421,7 @@ class LLMAnalysis:
         Args:
             batch_size (int): micro batch size
             seq_len (int): sequence length
-            is_inference (bool, optional): whether it is infernece or not. Defaults to True.
+            is_inference (bool, optional): whether it is inference or not. Defaults to True.
             activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
 
         Returns:
@@ -490,7 +490,7 @@ class LLMAnalysis:
         Args:
             batch_size (int): micro batch size
             seq_len (int): sequence length
-            is_inference (bool, optional): whether it is infernece or not. Defaults to True.
+            is_inference (bool, optional): whether it is inference or not. Defaults to True.
             activation_recomputation (ActivationRecomputation, optional): \
                 activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
 
@@ -569,7 +569,7 @@ class LLMAnalysis:
         Args:
             batch_size (int):
             seq_len (int): sequence length
-            is_inference (bool, optional): whether it is infernece or not. Defaults to True.
+            is_inference (bool, optional): whether it is inference or not. Defaults to True.
             activation_recomputation (ActivationRecomputation, optional): \
                 activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for \
@@ -668,7 +668,7 @@ class LLMAnalysis:
     ) -> int:
         """Get the number of floating point operations (flops) for the forward
         pass of the attention module in a transformer layer, given the batch
-        size and sequence length. The count is model-specifc and does not
+        size and sequence length. The count is model-specific and does not
         depend on the parallelism strategy.
 
         Args:
@@ -688,7 +688,7 @@ class LLMAnalysis:
     ) -> int:
         """Get the number of floating point operations (flops) for the forward
         pass of the MLP module in a transformer layer, given the batch size and
-        sequence length. The count is model-specifc and does not depend on the
+        sequence length. The count is model-specific and does not depend on the
         parallelism strategy.s.
 
         Args:
@@ -707,7 +707,7 @@ class LLMAnalysis:
     ) -> int:
         """Get the number of floating point operations (flops) for the forward
         pass of a transformer layer, given the batch size and sequence length.
-        The count is model-specifc and does not depend on the parallelism
+        The count is model-specific and does not depend on the parallelism
         strategy.
 
         Args:
@@ -724,7 +724,7 @@ class LLMAnalysis:
     def get_num_flops_fwd_total(self, batch_size: int, seq_len: int) -> int:
         """Get the number of floating point operations (flops) for the forward
         pass of the entire transformer, given the batch size and sequence
-        length. The count is model-specifc and does not depend on the
+        length. The count is model-specific and does not depend on the
         parallelism strategy.
 
         Args:
@@ -770,7 +770,7 @@ class LLMAnalysis:
     def get_num_flops_bwd_total(self, batch_size: int, seq_len: int) -> int:
         """Get the number of floating point operations (flops) for the backward
         pass of the entire transformer, estimated as the twice the number of
-        flops for the forward pass. The count is model-specifc and does not
+        flops for the forward pass. The count is model-specific and does not
         depend on the parallelism strategy.
 
         Args:
@@ -787,7 +787,7 @@ class LLMAnalysis:
     ) -> int:
         """Get the number of floating point operations (flops) for
         recomputation when using selective activation recomputation. The count
-        is model-specifc and does not depend on the parallelism strategy.
+        is model-specific and does not depend on the parallelism strategy.
 
         Args:
             batch_size (int): batch size
@@ -815,7 +815,7 @@ class LLMAnalysis:
         Args:
             batch_size (int): batch size
             seq_len (int): sequence length
-            is_inference (bool, optional): whether it is infernece or not. Defaults to True.
+            is_inference (bool, optional): whether it is inference or not. Defaults to True.
             activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
 
         Returns:
@@ -874,7 +874,7 @@ class LLMAnalysis:
         Args:
             batch_size (int): batch size
             seq_len (int): sequence length
-            is_inference (bool, optional): whether it is infernece or not. Defaults to True.
+            is_inference (bool, optional): whether it is inference or not. Defaults to True.
             activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
 
         Returns:
@@ -927,7 +927,7 @@ class LLMAnalysis:
     ) -> float:
         """Get the latency for the forward pass of a single layernorm in a
         transformer layer, given the batch size, sequence length, activation
-        recomputation stategy, and data type. The latency is the memory latency
+        recomputation strategy, and data type. The latency is the memory latency
         as layernorm is a memory-bound operation.
 
         Args:
@@ -999,7 +999,7 @@ class LLMAnalysis:
     ) -> tuple:
         """Get the latency for the forward pass of a transformer layer, given
         the batch size, sequence length, training or inference, activation
-        recomputation stategy, and layernorm data type. The latency is the sum
+        recomputation strategy, and layernorm data type. The latency is the sum
         of the latency for the attention module, MLP module, two layernorms,
         and two (Megatron-LM tp implementation) allreduce communications across
         the tensor parallel group.
@@ -1007,7 +1007,7 @@ class LLMAnalysis:
         Args:
             batch_size (int): batch size
             seq_len (int): sequence length
-            is_inference (bool, optional): whether it is infernece or not. Defaults to True.
+            is_inference (bool, optional): whether it is inference or not. Defaults to True.
             activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Defaults to BYTES_FP32. Often has to be FP32 in training to maintain model accuracy.
 
@@ -1134,7 +1134,7 @@ class LLMAnalysis:
         Args:
             batch_size (int): batch size
             seq_len (int): sequence length
-            is_inference (bool, optional): whether it is infernece or not. Defaults to True.
+            is_inference (bool, optional): whether it is inference or not. Defaults to True.
             activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Defaults to BYTES_FP32. Often has to be FP32 in training to maintain model accuracy.
             breakdown_prefix (str, optional): prefix for the breakdown dict keys. Defaults to "".
@@ -1783,7 +1783,7 @@ class LLMAnalysis:
         )
 
         assert memory_left > 0, (
-            "model weight/optmizer stage/graident is too large (requiring"
+            "model weight/optimizer stage/gradient is too large (requiring"
             f" {_num_to_string(weight_memory_per_gpu)}B /"
             f" {_num_to_string(optimizer_state_memory_per_gpu)}B /"
             f" {_num_to_string(gradient_memory_per_gpu)}B) to fit in total GPU"
@@ -1837,7 +1837,7 @@ class LLMAnalysis:
             "activation memory is too large with batch_size_per_gpu ="
             f" {batch_size_per_gpu} to fit in GPU memory (requiring"
             f" {_num_to_string(activation_memory_per_gpu)}B, memory_left after"
-            " fitting in model weights, graidents, and optimizer states ="
+            " fitting in model weights, gradients, and optimizer states ="
             f" {_num_to_string(memory_left)}B, max_batch_size_per_gpu ="
             f" {max_batch_size_per_gpu})"
         )
@@ -1914,9 +1914,9 @@ class LLMAnalysis:
         if total_num_tokens is not None:
             if total_num_tokens < 20 * self.total_num_params:
                 logger.warning(
-                    "accordig to the Chinchilla paper"
+                    "according to the Chinchilla paper"
                     " (https://arxiv.org/abs/2203.15556), to train a"
-                    " compute-optimial LLM, \nwe need around 20 text tokens"
+                    " compute-optimal LLM, \nwe need around 20 text tokens"
                     " per parameter, the given total_num_tokens /"
                     " total_num_tokens ="
                     f" {round(total_num_tokens/self.total_num_params, 3)} "
@@ -1974,7 +1974,7 @@ class LLMAnalysis:
             "activation_recomputation": ActivationRecomputation(
                 activation_recomputation
             ).name,
-            "achived_flops": self.get_TFLOPS_per_gpu(),
+            "achieved_flops": self.get_TFLOPS_per_gpu(),
             "flops_efficiency": self.flops_efficiency,
             "hbm_memory_efficiency": self.hbm_memory_efficiency,
             "num_flops_total_per_micro_batch": num_flops_total_per_micro_batch,

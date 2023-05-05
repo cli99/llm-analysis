@@ -22,7 +22,7 @@ from llm_analysis.config import (
 )
 
 
-def test_get_mdoel_config_by_name():
+def test_get_model_config_by_name():
     model_name = "facebook/opt-125m"
     model_config = get_model_config_by_name(model_name)
     assert isinstance(model_config, ModelConfig)
