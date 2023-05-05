@@ -22,7 +22,7 @@ The analyses below are performed with llm-analysis as a showcase.
 
 ## Training Analysis
 
-For training analysis, we use `flops_efficency = 0.5` and `hbm_memory_efficiency = 0.9` as observed by the literature.
+For training analysis, we use `flops_efficiency = 0.5` and `hbm_memory_efficiency = 0.9` as observed by the literature.
 The setup follows the paper description and is detailed in the [run_train.sh](run_train.sh) script.
 The output summaries are in [outputs_train](outputs_train) directory (both raw and readable jsons are produced).
 For example, [here](outputs_train/decapoda-research_llama-65b-hf-a100-sxm-80gb-w16a16e16-tp8-pp8-dp32-sp8-fe0.5-hbme0.9-summary-readable.txt) is a full readable summary of LLaMA-65B model.
@@ -77,7 +77,7 @@ As an example inference analysis, if not mentioned, we use ideal flop and memory
 
 Below shows the prefill and decode (per token) latency for the LLaMA models.
 The script used is in [run_infer.sh](run_infer.sh) and the output summaries are in [outputs_infer_ideal](outputs_infer_ideal).
-Results for `flops_efficency (fe) = 0.5` and `hbm_memory_efficiency (hbme) = 0.9` (in [outputs_infer](outputs_infer)) are also presented as a comparison.
+Results for `flops_efficiency (fe) = 0.5` and `hbm_memory_efficiency (hbme) = 0.9` (in [outputs_infer](outputs_infer)) are also presented as a comparison.
 
 | model     | ideal prefill latency  (ms) | ideal decode latency (ms) | prefill latency with fe=0.7, hbme=0.9 (ms) | decode latency with fe=0.7, hbme=0.9 (ms) |
 |-----------|-----------------------------|---------------------------|--------------------------------------------|-------------------------------------------|
@@ -93,7 +93,7 @@ Below shows the time breakdown for the decode stage in ideal model inference.
 
 ### Quantization
 
-Below shows the prefill and decode (per token) latency with different quantization schemes (data types) in ideal model inference. The following data type configuraions are compared to the [w16a16e16](../../llm_analysis/dtype_configs/w16a16e16.json): [w4a4e16](../../llm_analysis/dtype_configs/w4a4e16.json), [w4a8e16](../../llm_analysis/dtype_configs/w4a8e16.json), [w4a16e16](../../llm_analysis/dtype_configs/w4a16e16.json), and [w8a8e16](../../llm_analysis/dtype_configs/w8a8e16.json).
+Below shows the prefill and decode (per token) latency with different quantization schemes (data types) in ideal model inference. The following data type configurations are compared to the [w16a16e16](../../llm_analysis/dtype_configs/w16a16e16.json): [w4a4e16](../../llm_analysis/dtype_configs/w4a4e16.json), [w4a8e16](../../llm_analysis/dtype_configs/w4a8e16.json), [w4a16e16](../../llm_analysis/dtype_configs/w4a16e16.json), and [w8a8e16](../../llm_analysis/dtype_configs/w8a8e16.json).
 The output summaries for these schemes are in `output_infer_ideal_[scheme]`.
 
 Note that to leverage INT4 (or INT8) GEMM, both weights and activations need to be in INT4 (or INT8).
