@@ -660,7 +660,8 @@ class LLMAnalysis:
             * batch_size
             * seq_len
             * self.model_config.hidden_dim
-            / self.parallelism_config.tp_size
+            * self.model_config.n_head
+            / (self.model_config.num_key_value_heads * self.parallelism_config.tp_size)
         ) * kv_cache_dtype_bytes
 
     def get_num_flops_fwd_per_layer_attn(
@@ -679,9 +680,9 @@ class LLMAnalysis:
             int: the number of floating point operations for the forward pass of the attention module in a transformer layer
         """
         return (
-            8 * batch_size * seq_len * self.model_config.hidden_dim**2
+            4 * batch_size * seq_len * self.model_config.hidden_dim**2 + 4 * batch_size * seq_len * self.model_config.hidden_dim**2/self.model_config.num_key_value_groups
             + 4 * batch_size * seq_len**2 * self.model_config.hidden_dim
-        )
+        ) # q proj + attn_out + k proj + v proj + compute_attn
 
     def get_num_flops_fwd_per_layer_mlp(
         self, batch_size: int, seq_len: int
@@ -747,23 +748,24 @@ class LLMAnalysis:
             + num_flops_logit_layer
         )
 
-        # validate
-        assert within_range(
-            num_flops_fwd_total,
-            (
-                24
-                * batch_size
-                * num_layers
-                * seq_len
-                * hidden_dim**2
-                * (
-                    1
-                    + seq_len / (6 * hidden_dim)
-                    + vocab_size / (12 * num_layers * hidden_dim)
-                )
-            ),
-            TOLERANCE,
-        )
+        # validate only when using Multi Head Attention (MHA)
+        if self.model_config.num_key_value_groups == 1:
+            assert within_range(
+                num_flops_fwd_total,
+                (
+                    24
+                    * batch_size
+                    * num_layers
+                    * seq_len
+                    * hidden_dim**2
+                    * (
+                        1
+                        + seq_len / (6 * hidden_dim)
+                        + vocab_size / (12 * num_layers * hidden_dim)
+                    )
+                ),
+                TOLERANCE,
+            )
 
         return num_flops_fwd_total
 
@@ -1245,8 +1247,9 @@ class LLMAnalysis:
         summary_dict: dict,
         output_dir: str,
         print_human_readable: bool = True,
+        output_file_suffix: str = "",
     ):
-        file_name = self.get_configs_desc() + "-summary.json"
+        file_name = self.get_configs_desc() + output_file_suffix + "-summary.json"
         assert os.path.isdir(output_dir), f"{output_dir} is not a directory"
         with open(os.path.join(output_dir, file_name), "w") as f:
             json.dump(summary_dict, f, indent=4)
@@ -1255,7 +1258,7 @@ class LLMAnalysis:
         )
         if print_human_readable:
             log_str = self.get_readable_summary_dict(summary_dict)
-            file_name = self.get_configs_desc() + "-summary-readable.txt"
+            file_name = self.get_configs_desc() + output_file_suffix + "-summary-readable.txt"
             with open(os.path.join(output_dir, file_name), "w") as f:
                 f.write(log_str)
             logger.info(
@@ -1272,6 +1275,7 @@ class LLMAnalysis:
         layernorm_dtype_bytes: int = BYTES_FP16,
         kv_cache_dtype_bytes: int = None,
         output_dir: str = None,
+        output_file_suffix: str = "",
     ) -> dict:
         """Inference analysis given the configs and inputs.
 
@@ -1529,6 +1533,7 @@ class LLMAnalysis:
 
         if use_kv_cache:
             decode_latency += kv_cache_latency
+            decode_tokens_per_sec = 1/decode_latency
 
         total_decode_latency = decode_latency * num_tokens_to_generate
 
@@ -1551,11 +1556,13 @@ class LLMAnalysis:
             "decode_activation_memory_per_gpu": decode_activation_memory_per_gpu,
             "decode_num_flops_fwd_total": decode_num_flops_fwd_total,
             "prefill_latency": prefill_latency,
+            "prefill_tokens_per_sec": seq_len/prefill_latency,
         }
         summary_dict.update(prefill_latency_breakdown)
         summary_dict.update(
             {
                 "decode_latency": decode_latency,
+                "decode_tokens_per_sec": decode_tokens_per_sec,
             }
         )
         summary_dict.update(decode_latency_breakdown)
@@ -1575,7 +1582,7 @@ class LLMAnalysis:
 
         if output_dir is not None:
             self.output_summary_dict(
-                summary_dict, output_dir, print_human_readable=True
+                summary_dict, output_dir, print_human_readable=True, output_file_suffix=output_file_suffix
             )
 
         return summary_dict
@@ -2027,6 +2034,7 @@ def infer(
     intra_node_memory_efficiency=INTRA_NODE_MEMORY_EFFICIENCY,
     inter_node_memory_efficiency=INTER_NODE_MEMORY_EFFICIENCY,
     output_dir: str = None,
+    output_file_suffix: str = "",
 ) -> dict:
     """_summary_
 
@@ -2052,6 +2060,7 @@ def infer(
         intra_node_memory_efficiency (float, optional):  intra-node memory efficiency, ranging from 0 to 1. Defaults to INTRA_NODE_MEMORY_EFFICIENCY.
         inter_node_memory_efficiency (float, optional):  inter-node memory efficiency, ranging from 0 to 1. Defaults to INTER_NODE_MEMORY_EFFICIENCY.
         output_dir (str, optional): if set to a directory path, write the return summary dict out to the directory with the setup. Defaults to None.. Defaults to None.
+        output_file_suffix (str, optional): suffix of the output file. Defaults to "".
 
     Returns:
         dict: a summary dictionary of the inference analysis
@@ -2086,6 +2095,7 @@ def infer(
         layernorm_dtype_bytes=layernorm_dtype_bytes,
         kv_cache_dtype_bytes=kv_cache_dtype_bytes,
         output_dir=output_dir,
+        output_file_suffix=output_file_suffix,
     )
 
     return sumary_dict

@@ -1,0 +1,11 @@
+{
+    "name": "upstage_Llama-2-70b-instruct-v2",
+    "num_layers": 80,
+    "n_head": 64,
+    "hidden_dim": 8192,
+    "vocab_size": 32000,
+    "max_seq_len": 4096,
+    "num_key_value_heads": 8,
+    "ffn_embed_dim": 32768,
+    "model_type": "llama"
+}

@@ -52,6 +52,8 @@ class ModelConfig:
     hidden_dim: int  # hidden dimension
     vocab_size: int  # vocabulary size
     max_seq_len: int = None  # max sequence length
+    num_key_value_heads: int = None # the number of key value heads implementing Grouped Query Attention (GQA), If it is not specified, will default to n_head
+    num_key_value_groups: int = None  # number of key value groups for GQA
     ffn_embed_dim: int = (
         None  # hidden dimension of FFN, default to 4 * hidden_dim
     )
@@ -62,6 +64,10 @@ class ModelConfig:
     def __post_init__(self):
         if self.ffn_embed_dim is None:
             self.ffn_embed_dim = self.hidden_dim * 4
+        if self.num_key_value_heads is None:
+            self.num_key_value_heads = self.n_head
+        assert self.n_head % self.num_key_value_heads == 0, f"n_head ({self.n_head}) must be divisible by num_key_value_heads ({self.num_key_value_heads})"
+        self.num_key_value_groups = self.n_head / self.num_key_value_heads
 
     def __str__(self):
         return dataclasses.asdict(self).__str__()
@@ -164,6 +170,7 @@ def get_model_config_from_hf(
         model_type=hf_config.model_type
         if hasattr(hf_config, "model_type")
         else None,
+        num_key_value_heads=hf_config.num_key_value_heads if hasattr(hf_config, "num_key_value_heads") else None,
     )
     return config
 
