@@ -91,8 +91,9 @@ class LLMAnalysis:
         dtype_config: DtypeConfig = DtypeConfig(),
         parallelism_config: ParallelismConfig = ParallelismConfig(),
         achieved_tflops: float = None,
+        achieved_memory_bandwidth: float = None,
         flops_efficiency: float = None,
-        hbm_memory_efficiency: float = HBM_MEMORY_EFFICIENCY,
+        hbm_memory_efficiency: float = None,
         intra_node_memory_efficiency: float = INTRA_NODE_MEMORY_EFFICIENCY,
         inter_node_memory_efficiency: float = INTER_NODE_MEMORY_EFFICIENCY,
     ) -> None:
@@ -103,9 +104,10 @@ class LLMAnalysis:
             gpu_config (GPUConfig): GPU configuration
             dtype_config (DtypeConfig, optional): data type configuration. Defaults to DtypeConfig().
             parallelism_config (ParallelismConfig, optional): parallelism configuration. Defaults to ParallelismConfig().
-            achieved_tflops (float, optional): achieved TFLOPS per GPU. Defaults to None.
+            achieved_tflops (float, optional): achieved TFLOPS per GPU. If specified, will override the flops_efficiency passed in. Defaults to None.
+            achieved_memory_bandwidth (float, optional): achieved GPU memory bandwidth in GB/s. If specified, will override the hbm_memory_efficiency passed in. Defaults to None.
             flops_efficiency (float, optional): flops efficiency, ranging from 0 to 1. Defaults to None.
-            hbm_memory_efficiency (float, optional): GPU HBM memory efficiency, ranging from 0 to 1. Defaults to HBM_MEMORY_EFFICIENCY.
+            hbm_memory_efficiency (float, optional): GPU HBM memory efficiency, ranging from 0 to 1. Defaults to None.
             intra_node_memory_efficiency (float, optional):  intra-node memory efficiency, ranging from 0 to 1. Defaults to INTRA_NODE_MEMORY_EFFICIENCY.
             inter_node_memory_efficiency (float, optional):  inter-node memory efficiency, ranging from 0 to 1. Defaults to INTER_NODE_MEMORY_EFFICIENCY.
         """
@@ -113,9 +115,33 @@ class LLMAnalysis:
         self.gpu_config = gpu_config
         self.parallelism_config = parallelism_config
         self.dtype_config = dtype_config
-        self.hbm_memory_efficiency = hbm_memory_efficiency
         self.intra_node_memory_efficiency = intra_node_memory_efficiency
         self.inter_node_memory_efficiency = inter_node_memory_efficiency
+
+        if achieved_memory_bandwidth and hbm_memory_efficiency:
+            logger.info(
+                "both achieved_memory_bandwidth and hbm_memory_efficiency are set, using achieved_memory_bandwidth({achieved_memory_bandwidth} GB/s) to calculate hbm_memory_efficiency"
+            )
+            self.hbm_memory_efficiency = (
+                achieved_memory_bandwidth / gpu_config.hbm_bandwidth_in_GB_per_sec
+            )
+        elif hbm_memory_efficiency:
+            self.hbm_memory_efficiency = hbm_memory_efficiency
+        elif achieved_memory_bandwidth:
+            self.hbm_memory_efficiency = (
+                achieved_memory_bandwidth / gpu_config.hbm_bandwidth_in_GB_per_sec
+            )
+        else:
+            self.hbm_memory_efficiency = HBM_MEMORY_EFFICIENCY
+
+        assert self.hbm_memory_efficiency > 0 and self.hbm_memory_efficiency <= 1, (
+            "hbm_memory_efficiency must be in (0, 1], check the achieved_memory_bandwidth and hbm_memory_efficiency passed in"
+        )
+        logger.info(f"hbm_memory_efficiency: {self.hbm_memory_efficiency}")
+        if self.hbm_memory_efficiency > 0.8:
+            logger.warning(
+                "Note that benchmarks show closer to 0.6-0.7 hbm_memory_efficiency in inference workloads"
+            )
 
         if achieved_tflops and flops_efficiency:
             logger.info(
@@ -142,6 +168,7 @@ class LLMAnalysis:
             logger.warning(
                 "Note that Megatron-LM reported up to 0.6 flops efficiency for large scale model training"
             )
+
         if self.parallelism_config.sp_size > 1:
             assert (
                 self.parallelism_config.sp_size
@@ -1274,6 +1301,7 @@ class LLMAnalysis:
         ds_zero: DSZeRO = DSZeRO.NONE,
         layernorm_dtype_bytes: int = BYTES_FP16,
         kv_cache_dtype_bytes: int = None,
+        cost_per_gpu_hour: float = None,
         output_dir: str = None,
         output_file_suffix: str = "",
     ) -> dict:
@@ -1287,6 +1315,7 @@ class LLMAnalysis:
             ds_zero (DSZeRO, optional): which DeepSpeed ZeRO stage to use. Defaults to DSZeRO.NONE (disabled).
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Defaults to BYTES_FP32. Often has to be at least FP16 in inference to maintain model accuracy.
             kv_cache_dtype_bytes (int, optional): number of bytes in the data type for the kv_cache. Defaults to None. Often has to be at least FP16 in inference to maintain model accuracy.
+            cost_per_gpu_hour (float, optional): dollar cost per GPU hour. Defaults to None.
             output_dir (str, optional): if set to a directory path, write the return summary dict out to the directory with the setup. Defaults to None.
             output_dir (str, optional): if set to a directory path, write the return summary dict out to the directory with the setup. Defaults to None.
 
@@ -1533,9 +1562,13 @@ class LLMAnalysis:
 
         if use_kv_cache:
             decode_latency += kv_cache_latency
-            decode_tokens_per_sec = 1/decode_latency
 
         total_decode_latency = decode_latency * num_tokens_to_generate
+        total_per_token_latency = (prefill_latency + total_decode_latency) / num_tokens_to_generate
+
+        decode_tokens_per_sec = batch_size_per_gpu * 1 / decode_latency
+        prefill_tokens_per_sec = batch_size_per_gpu * seq_len / prefill_latency
+        total_tokens_per_sec = batch_size_per_gpu / total_per_token_latency
 
         summary_dict = {
             "batch_size_per_gpu": batch_size_per_gpu,
@@ -1543,6 +1576,8 @@ class LLMAnalysis:
             "tp_size": self.parallelism_config.tp_size,
             "pp_size": self.parallelism_config.pp_size,
             "num_tokens_to_generate": num_tokens_to_generate,
+            "flops_efficiency": self.flops_efficiency,
+            "hbm_memory_efficiency": self.hbm_memory_efficiency,
             "use_kv_cache": use_kv_cache,
             "kv_cache_memory_per_gpu": kv_cache_memory_per_gpu,
             "kv_cache_latency": kv_cache_latency,
@@ -1556,13 +1591,12 @@ class LLMAnalysis:
             "decode_activation_memory_per_gpu": decode_activation_memory_per_gpu,
             "decode_num_flops_fwd_total": decode_num_flops_fwd_total,
             "prefill_latency": prefill_latency,
-            "prefill_tokens_per_sec": seq_len/prefill_latency,
         }
+
         summary_dict.update(prefill_latency_breakdown)
         summary_dict.update(
             {
                 "decode_latency": decode_latency,
-                "decode_tokens_per_sec": decode_tokens_per_sec,
             }
         )
         summary_dict.update(decode_latency_breakdown)
@@ -1571,12 +1605,27 @@ class LLMAnalysis:
                 "total_decode_latency": total_decode_latency,
                 "total_latency": prefill_latency
                 + decode_latency * num_tokens_to_generate,
-                "total_per_token_latency": (
-                    prefill_latency + total_decode_latency
-                )
-                / num_tokens_to_generate,
+                "total_per_token_latency": total_per_token_latency,
+            })
+
+        summary_dict.update(
+            {
+                "prefill_tokens_per_sec": prefill_tokens_per_sec,
+                "decode_tokens_per_sec": decode_tokens_per_sec,
+                "total_tokens_per_sec": total_tokens_per_sec,
             }
         )
+
+        if cost_per_gpu_hour:
+            num_gpus = self.parallelism_config.pp_size * self.parallelism_config.tp_size
+            def compute_cost_per_1k_tokens(tokens_per_sec):
+                return 1000 * cost_per_gpu_hour * num_gpus / 3600 / tokens_per_sec
+            prefill_cost_per_1k_tokens = compute_cost_per_1k_tokens(prefill_tokens_per_sec)
+            decode_cost_per_1k_tokens = compute_cost_per_1k_tokens(decode_tokens_per_sec)
+            total_cost_per_1k_tokens = compute_cost_per_1k_tokens(total_tokens_per_sec)
+            summary_dict.update({"prefill_cost_per_1k_tokens": prefill_cost_per_1k_tokens,
+                                 "decode_cost_per_1k_tokens": decode_cost_per_1k_tokens,
+                                 "total_cost_per_1k_tokens": total_cost_per_1k_tokens})
 
         logger.info(self.get_readable_summary_dict(summary_dict))
 
@@ -2029,10 +2078,12 @@ def infer(
     layernorm_dtype_bytes: int = BYTES_FP16,
     kv_cache_dtype_bytes: int = None,
     achieved_tflops: float = None,
+    achieved_memory_bandwidth: float = None,
     flops_efficiency: float = None,
-    hbm_memory_efficiency: float = HBM_MEMORY_EFFICIENCY,
+    hbm_memory_efficiency: float = None,
     intra_node_memory_efficiency=INTRA_NODE_MEMORY_EFFICIENCY,
-    inter_node_memory_efficiency=INTER_NODE_MEMORY_EFFICIENCY,
+    inter_node_memory_efficiency = INTER_NODE_MEMORY_EFFICIENCY,
+    cost_per_gpu_hour: float = None,
     output_dir: str = None,
     output_file_suffix: str = "",
 ) -> dict:
@@ -2054,11 +2105,13 @@ def infer(
         use_kv_cache (bool, optional): whether to use kv cache. Defaults to True.
         layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Defaults to BYTES_FP32. Often has to be at least FP16 in inference to maintain model accuracy.
         kv_cache_dtype_bytes (int, optional): number of bytes in the data type for the kv_cache. Defaults to None. Often has to be at least FP16 in inference to maintain model accuracy.
-        achieved_tflops (float, optional): achieved TFLOPS per GPU. Defaults to None.
+        achieved_tflops (float, optional): achieved TFLOPS per GPU. If specified, will override the flops_efficiency passed in. Defaults to None.
+        achieved_memory_bandwidth (float, optional): achieved GPU memory bandwidth in GB/s. If specified, will override the hbm_memory_efficiency passed in. Defaults to None.
         flops_efficiency (float, optional): flops efficiency, ranging from 0 to 1. Defaults to None.
         hbm_memory_efficiency (float, optional): GPU HBM memory efficiency, ranging from 0 to 1. Defaults to HBM_MEMORY_EFFICIENCY.
         intra_node_memory_efficiency (float, optional):  intra-node memory efficiency, ranging from 0 to 1. Defaults to INTRA_NODE_MEMORY_EFFICIENCY.
         inter_node_memory_efficiency (float, optional):  inter-node memory efficiency, ranging from 0 to 1. Defaults to INTER_NODE_MEMORY_EFFICIENCY.
+        cost_per_gpu_hour (float, optional): dollar cost per GPU hour. Defaults to None.
         output_dir (str, optional): if set to a directory path, write the return summary dict out to the directory with the setup. Defaults to None.. Defaults to None.
         output_file_suffix (str, optional): suffix of the output file. Defaults to "".
 
@@ -2079,11 +2132,12 @@ def infer(
         gpu_config,
         dtype_config,
         parallel_config,
+        achieved_tflops=achieved_tflops,
+        achieved_memory_bandwidth=achieved_memory_bandwidth,
+        flops_efficiency=flops_efficiency,
         hbm_memory_efficiency=hbm_memory_efficiency,
         intra_node_memory_efficiency=intra_node_memory_efficiency,
         inter_node_memory_efficiency=inter_node_memory_efficiency,
-        achieved_tflops=achieved_tflops,
-        flops_efficiency=flops_efficiency,
     )
 
     sumary_dict = analysis.inference(
@@ -2094,6 +2148,7 @@ def infer(
         ds_zero=DSZeRO(ds_zero),
         layernorm_dtype_bytes=layernorm_dtype_bytes,
         kv_cache_dtype_bytes=kv_cache_dtype_bytes,
+        cost_per_gpu_hour=cost_per_gpu_hour,
         output_dir=output_dir,
         output_file_suffix=output_file_suffix,
     )
