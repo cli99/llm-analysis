@@ -52,7 +52,7 @@ class ModelConfig:
     hidden_dim: int  # hidden dimension
     vocab_size: int  # vocabulary size
     max_seq_len: int = None  # max sequence length
-    num_key_value_heads: int = None # the number of key value heads implementing Grouped Query Attention (GQA), If it is not specified, will default to n_head
+    num_key_value_heads: int = None # the number of key value heads implementing Grouped Query Attention (GQA), If it is not specified, will default to n_head. If `num_key_value_heads=num_attention_heads`, the model will use Multi Head Attention (MHA), if `num_key_value_heads=1 the model will use Multi Query Attention (MQA) otherwise GQA is used. See https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/configuration_llama.py for details
     num_key_value_groups: int = None  # number of key value groups for GQA
     ffn_embed_dim: int = (
         None  # hidden dimension of FFN, default to 4 * hidden_dim
