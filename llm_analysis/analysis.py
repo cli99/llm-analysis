@@ -91,7 +91,7 @@ class LLMAnalysis:
         dtype_config: DtypeConfig = DtypeConfig(),
         parallelism_config: ParallelismConfig = ParallelismConfig(),
         achieved_tflops: float = None,
-        achieved_memory_bandwidth: float = None,
+        achieved_memory_bandwidth_GBs: float = None,
         flops_efficiency: float = None,
         hbm_memory_efficiency: float = None,
         intra_node_memory_efficiency: float = INTRA_NODE_MEMORY_EFFICIENCY,
@@ -105,7 +105,7 @@ class LLMAnalysis:
             dtype_config (DtypeConfig, optional): data type configuration. Defaults to DtypeConfig().
             parallelism_config (ParallelismConfig, optional): parallelism configuration. Defaults to ParallelismConfig().
             achieved_tflops (float, optional): achieved TFLOPS per GPU. If specified, will override the flops_efficiency passed in. Defaults to None.
-            achieved_memory_bandwidth (float, optional): achieved GPU memory bandwidth in GB/s. If specified, will override the hbm_memory_efficiency passed in. Defaults to None.
+            achieved_memory_bandwidth_GBs (float, optional): achieved GPU memory bandwidth in GB/s. If specified, will override the hbm_memory_efficiency passed in. Defaults to None.
             flops_efficiency (float, optional): flops efficiency, ranging from 0 to 1. Defaults to None.
             hbm_memory_efficiency (float, optional): GPU HBM memory efficiency, ranging from 0 to 1. Defaults to None.
             intra_node_memory_efficiency (float, optional):  intra-node memory efficiency, ranging from 0 to 1. Defaults to INTRA_NODE_MEMORY_EFFICIENCY.
@@ -118,24 +118,24 @@ class LLMAnalysis:
         self.intra_node_memory_efficiency = intra_node_memory_efficiency
         self.inter_node_memory_efficiency = inter_node_memory_efficiency
 
-        if achieved_memory_bandwidth and hbm_memory_efficiency:
+        if achieved_memory_bandwidth_GBs and hbm_memory_efficiency:
             logger.info(
-                "both achieved_memory_bandwidth and hbm_memory_efficiency are set, using achieved_memory_bandwidth({achieved_memory_bandwidth} GB/s) to calculate hbm_memory_efficiency"
+                "both achieved_memory_bandwidth_GBs and hbm_memory_efficiency are set, using achieved_memory_bandwidth_GBs({achieved_memory_bandwidth_GBs} GB/s) to calculate hbm_memory_efficiency"
             )
             self.hbm_memory_efficiency = (
-                achieved_memory_bandwidth / gpu_config.hbm_bandwidth_in_GB_per_sec
+                achieved_memory_bandwidth_GBs / gpu_config.hbm_bandwidth_in_GB_per_sec
             )
         elif hbm_memory_efficiency:
             self.hbm_memory_efficiency = hbm_memory_efficiency
-        elif achieved_memory_bandwidth:
+        elif achieved_memory_bandwidth_GBs:
             self.hbm_memory_efficiency = (
-                achieved_memory_bandwidth / gpu_config.hbm_bandwidth_in_GB_per_sec
+                achieved_memory_bandwidth_GBs / gpu_config.hbm_bandwidth_in_GB_per_sec
             )
         else:
             self.hbm_memory_efficiency = HBM_MEMORY_EFFICIENCY
 
         assert self.hbm_memory_efficiency > 0 and self.hbm_memory_efficiency <= 1, (
-            "hbm_memory_efficiency must be in (0, 1], check the achieved_memory_bandwidth and hbm_memory_efficiency passed in"
+            "hbm_memory_efficiency must be in (0, 1], check the achieved_memory_bandwidth_GBs and hbm_memory_efficiency passed in"
         )
         logger.info(f"hbm_memory_efficiency: {self.hbm_memory_efficiency}")
         if self.hbm_memory_efficiency > 0.8:
@@ -596,7 +596,7 @@ class LLMAnalysis:
         Args:
             batch_size (int):
             seq_len (int): sequence length
-            is_inference (bool, optional): whether it is inference or not. Defaults to True.
+            is_inference (bool, optional): whether it is inference or not. Return the max memory activation tensor size between layernorm/attn/mlp. Defaults to True.
             activation_recomputation (ActivationRecomputation, optional): \
                 activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for \
@@ -639,7 +639,7 @@ class LLMAnalysis:
             memory_activation_per_layer_attn
             + memory_activation_per_layer_mlp
             + 2 * memory_activation_per_layer_layernorm
-        )
+        ) if not is_inference else max(memory_activation_per_layer_attn, memory_activation_per_layer_mlp, memory_activation_per_layer_layernorm)
 
         logger.debug(
             "memory_activation_per_layer_attn:"
@@ -682,14 +682,19 @@ class LLMAnalysis:
             kv_cache_dtype_bytes = (
                 self.dtype_config.activation_bits / BITS_PER_BYTE
             )
-        return (
+        head_dim = self.model_config.hidden_dim / self.model_config.n_head
+        num_heads_per_gpu = max(self.model_config.num_key_value_heads / self.parallelism_config.tp_size, 1) # At least on attention head on each tensor-parallel GPU
+
+        memory_kv_cache_per_layer =  (
             2
             * batch_size
             * seq_len
-            * self.model_config.hidden_dim
-            * self.model_config.n_head
-            / (self.model_config.num_key_value_heads * self.parallelism_config.tp_size)
+            * head_dim
+            * num_heads_per_gpu
         ) * kv_cache_dtype_bytes
+        logger.debug(f"memory_kv_cache_per_layer = {_num_to_string(memory_kv_cache_per_layer)} B")
+
+        return memory_kv_cache_per_layer
 
     def get_num_flops_fwd_per_layer_attn(
         self, batch_size: int, seq_len: int
@@ -1468,7 +1473,7 @@ class LLMAnalysis:
                 )
             )
             decode_activation_memory_per_gpu = (
-                decode_activation_memory_per_layer * num_layers_per_gpu
+                decode_activation_memory_per_layer
             )
 
             logger.info(
@@ -1538,7 +1543,7 @@ class LLMAnalysis:
                 )
             )
             decode_activation_memory_per_gpu = (
-                decode_activation_memory_per_layer * num_layers_per_gpu
+                decode_activation_memory_per_layer
             )
             kv_cache_memory_per_gpu = 0
             kv_cache_latency = 0
@@ -2078,7 +2083,7 @@ def infer(
     layernorm_dtype_bytes: int = BYTES_FP16,
     kv_cache_dtype_bytes: int = None,
     achieved_tflops: float = None,
-    achieved_memory_bandwidth: float = None,
+    achieved_memory_bandwidth_GBs: float = None,
     flops_efficiency: float = None,
     hbm_memory_efficiency: float = None,
     intra_node_memory_efficiency=INTRA_NODE_MEMORY_EFFICIENCY,
@@ -2106,7 +2111,7 @@ def infer(
         layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Defaults to BYTES_FP32. Often has to be at least FP16 in inference to maintain model accuracy.
         kv_cache_dtype_bytes (int, optional): number of bytes in the data type for the kv_cache. Defaults to None. Often has to be at least FP16 in inference to maintain model accuracy.
         achieved_tflops (float, optional): achieved TFLOPS per GPU. If specified, will override the flops_efficiency passed in. Defaults to None.
-        achieved_memory_bandwidth (float, optional): achieved GPU memory bandwidth in GB/s. If specified, will override the hbm_memory_efficiency passed in. Defaults to None.
+        achieved_memory_bandwidth_GBs (float, optional): achieved GPU memory bandwidth in GB/s. If specified, will override the hbm_memory_efficiency passed in. Defaults to None.
         flops_efficiency (float, optional): flops efficiency, ranging from 0 to 1. Defaults to None.
         hbm_memory_efficiency (float, optional): GPU HBM memory efficiency, ranging from 0 to 1. Defaults to HBM_MEMORY_EFFICIENCY.
         intra_node_memory_efficiency (float, optional):  intra-node memory efficiency, ranging from 0 to 1. Defaults to INTRA_NODE_MEMORY_EFFICIENCY.
@@ -2133,7 +2138,7 @@ def infer(
         dtype_config,
         parallel_config,
         achieved_tflops=achieved_tflops,
-        achieved_memory_bandwidth=achieved_memory_bandwidth,
+        achieved_memory_bandwidth_GBs=achieved_memory_bandwidth_GBs,
         flops_efficiency=flops_efficiency,
         hbm_memory_efficiency=hbm_memory_efficiency,
         intra_node_memory_efficiency=intra_node_memory_efficiency,
