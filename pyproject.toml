@@ -1,11 +1,11 @@
 [tool.poetry]
 name = "llm-analysis"
-version = "0.1.0"
+version = "0.1.1"
 description = "Latency and Memory Analysis of Transformer Models for Training and Inference"
 authors = ["Cheng Li <pistasable@gmail.com>"]
 license = "Apache License, Version 2.0"
 readme = "README.md"
-packages = [{include = "llm_analysis"}]
+packages = [{ include = "llm_analysis" }]
 
 [tool.poetry.dependencies]
 python = "^3.8"
@@ -15,7 +15,7 @@ transformers = "^4.28.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.3.1"
-coverage = {extras = ["toml"], version = "^7.2.5"}
+coverage = { extras = ["toml"], version = "^7.2.5" }
 sphinx = "^7.0.0"
 sphinx-autodoc-typehints = "^1.23.0"
 pytest-cov = "^4.0.0"
