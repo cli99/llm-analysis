@@ -53,3 +53,32 @@ def test_fastertransformer_13b_tp1():
     assert within_range(
         summary_dict["decode_latency"] * 1000, 17.07, TOLERANCE
     )
+
+def test_llama2_70b():
+    model_name = "upstage/Llama-2-70b-instruct-v2"
+    dtype_name = "w16a16e16"
+    gpu_name = "a100-sxm-80gb"
+
+    tp_size = 2
+    batch_size_per_gpu = 1
+    model_config = get_model_config_by_name(model_name)
+    gpu_config = get_gpu_config_by_name(gpu_name)
+    dtype_config = get_dtype_config_by_name(dtype_name)
+    parallel_config = ParallelismConfig(tp_size=tp_size)
+
+    analysis = LLMAnalysis(
+        model_config,
+        gpu_config,
+        dtype_config,
+        parallel_config,
+    )
+
+    summary_dict = analysis.inference(
+        batch_size_per_gpu=batch_size_per_gpu,
+        seq_len=512,
+        num_tokens_to_generate=512,
+    )
+
+    assert within_range(
+        summary_dict["total_decode_latency"], 17.05, TOLERANCE
+    )
