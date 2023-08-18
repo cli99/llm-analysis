@@ -31,7 +31,7 @@ analysis = LLMAnalysis(
 experiments = [(1, 128, 242), (2, 128, 512), (4, 128, 512), (1, 512, 512), (2, 512, 512), (4, 512, 512), (1, 512, 304), (8, 512, 512), (16, 512, 512), (32, 512, 512), (1, 1024, 512), (2, 1024, 512), (4, 1024, 512), (8, 1024, 512), (16, 1024, 512), (1, 3595, 512), (2, 3595, 512), (4, 3595, 512)]
 
 with open(output_file, mode='w') as csv_file:
-    fieldnames = ["Batch Size", "Prompt Tokens", "Completion Tokens", "Time to first token (ms)", "Time for completion (s)", "Tokens/second", "Price/1k prompt tokens", "Price /1k Completion tokens"]
+    fieldnames = ["Batch Size", "Prompt Tokens", "Completion Tokens", "Time to first token (s)", "Time for completion (s)", "Tokens/second", "Price/1k prompt tokens", "Price /1k Completion tokens"]
     writer = csv.writer(csv_file)
     writer.writerow(fieldnames)
     selected_keys = ["batch_size_per_gpu", "seq_len", "num_tokens_to_generate", "prefill_latency", "total_decode_latency", "total_tokens_per_sec", "prefill_cost_per_1k_tokens", "decode_cost_per_1k_tokens"]
