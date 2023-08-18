@@ -13,7 +13,7 @@ The cost per GPU hour uses `$2.21`. For other details, check `run_infer_cursor.p
 
 - `flops_efficiency=0.6 and hbm_memory_efficiency=0.6`
 
-| Batch Size | Prompt Tokens | Completion Tokens | Time to first token (ms) | Time for completion (s) | Tokens/second | Price/1k prompt tokens | Price /1k Completion tokens |
+| Batch Size | Prompt Tokens | Completion Tokens | Time to first token (s) | Time for completion (s) | Tokens/second | Price/1k prompt tokens | Price /1k Completion tokens |
 | ---------- | ------------- | ----------------- | ------------------------ | ----------------------- | ------------- | ---------------------- | --------------------------- |
 | 1          | 128           | 242               | 0.055                    | 13.185                  | 18.277        | 0.000532               | 0.06689                     |
 | 2          | 128           | 512               | 0.080                    | 28.025                  | 36.434        | 0.000386               | 0.03360                     |
@@ -36,7 +36,7 @@ The cost per GPU hour uses `$2.21`. For other details, check `run_infer_cursor.p
 
 - `flops_efficiency=0.7 and hbm_memory_efficiency=0.9`
 
-| Batch Size | Prompt Tokens | Completion Tokens | Time to first token (ms) | Time for completion (s) | Tokens/second | Price/1k prompt tokens | Price /1k Completion tokens |
+| Batch Size | Prompt Tokens | Completion Tokens | Time to first token (s) | Time for completion (s) | Tokens/second | Price/1k prompt tokens | Price /1k Completion tokens |
 | ---------- | ------------- | ----------------- | ------------------------ | ----------------------- | ------------- | ---------------------- | --------------------------- |
 | 1          | 128           | 242               | 0.039                    | 8.894                   | 27.090        | 0.000374               | 0.04512                     |
 | 2          | 128           | 512               | 0.068                    | 18.903                  | 53.976        | 0.000326               | 0.02267                     |
