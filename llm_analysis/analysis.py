@@ -462,7 +462,9 @@ class LLMAnalysis:
             self.dtype_config.activation_bits / BITS_PER_BYTE
         )
 
-        if activation_recomputation == ActivationRecomputation.FULL:
+        if is_inference:
+            return (4 * seq_len * batch_size * hidden_dim / sp_size) * bytes_per_activation
+        elif (not is_inference) and activation_recomputation == ActivationRecomputation.FULL:
             return (
                 seq_len
                 * batch_size
@@ -478,9 +480,7 @@ class LLMAnalysis:
                 + n_head * seq_len**2 * batch_size
             )
             / sp_size
-            if (
-                not is_inference
-                and activation_recomputation
+            if (activation_recomputation
                 != activation_recomputation.SELECTIVE
             )
             else 0
@@ -488,7 +488,7 @@ class LLMAnalysis:
 
         selective_compute_elems = (
             0
-            if (not is_inference and activation_recomputation.SELECTIVE)
+            if activation_recomputation.SELECTIVE
             else (2 * n_head * seq_len**2 * batch_size / tp_size)
         )
 
@@ -524,9 +524,6 @@ class LLMAnalysis:
         Returns:
             float: the memory (in bytes) required  to store the activations of the MLP in a transformer layer
         """
-        if activation_recomputation == ActivationRecomputation.FULL:
-            return 0
-
         tp_size = self.parallelism_config.tp_size
         sp_size = self.parallelism_config.sp_size
         hidden_dim = self.model_config.hidden_dim
@@ -534,11 +531,14 @@ class LLMAnalysis:
             self.dtype_config.activation_bits / BITS_PER_BYTE
         )
 
+        if is_inference:
+            return (5 * seq_len * batch_size * hidden_dim / sp_size) * bytes_per_activation
+        elif (not is_inference) and activation_recomputation == ActivationRecomputation.FULL:
+            return 0
+
         # dropout mask only requires a single byte per element
         drop_out_mask = (
             seq_len * batch_size * hidden_dim / sp_size
-            if not is_inference
-            else 0
         )
 
         memory_activation_per_layer_mlp = (
@@ -587,11 +587,11 @@ class LLMAnalysis:
         activation_recomputation: ActivationRecomputation = ActivationRecomputation.NONE,
         layernorm_dtype_bytes: int = BYTES_FP32,
     ) -> float:
-        """Get the memory (in bytes) required  to store the activations of a
+        """Get the memory (in bytes) required to store the activations of a
         transformer layer, given the batch size, sequence length, and whether
         it is inference or training, the activation recomputation strategy, and
         the activation data type. Refer to https://arxiv.org/abs/2205.05198 for
-        details.
+        details. For inference, this assumes the maximum tensor buffer reuse.
 
         Args:
             batch_size (int):
@@ -604,7 +604,7 @@ class LLMAnalysis:
         Returns:
             float: the memory (in bytes) required  to store the activations of a transformer layer
         """
-        if activation_recomputation == ActivationRecomputation.FULL:
+        if (not is_inference) and activation_recomputation == ActivationRecomputation.FULL:
             return (
                 seq_len
                 * batch_size
@@ -635,12 +635,6 @@ class LLMAnalysis:
             )
         )
 
-        memory_activation_per_layer = (
-            memory_activation_per_layer_attn
-            + memory_activation_per_layer_mlp
-            + 2 * memory_activation_per_layer_layernorm
-        ) if not is_inference else max(memory_activation_per_layer_attn, memory_activation_per_layer_mlp, memory_activation_per_layer_layernorm)
-
         logger.debug(
             "memory_activation_per_layer_attn:"
             f" {_num_to_string(memory_activation_per_layer_attn)}B,"
@@ -650,13 +644,21 @@ class LLMAnalysis:
             f" {_num_to_string(memory_activation_per_layer_layernorm)}B"
         )
 
-        logger.debug(
+        if is_inference:
+            memory_activation_per_layer = max(memory_activation_per_layer_attn, memory_activation_per_layer_mlp, memory_activation_per_layer_layernorm)
+        else:
+            memory_activation_per_layer = (
+                memory_activation_per_layer_attn
+                + memory_activation_per_layer_mlp
+                + 2 * memory_activation_per_layer_layernorm
+            )
+            logger.debug(
             "memory_activation_per_layer:"
             f" {_num_to_string(memory_activation_per_layer)}B"
             f" ({_num_to_string(memory_activation_per_layer_attn)}B +"
             f" {_num_to_string(memory_activation_per_layer_mlp)}B + 2 *"
             f" {_num_to_string(2*memory_activation_per_layer_layernorm)}B)"
-        )
+            )
 
         return memory_activation_per_layer
 
@@ -1386,7 +1388,6 @@ class LLMAnalysis:
                 is_inference=True,
                 layernorm_dtype_bytes=layernorm_dtype_bytes,
             )
-            * self.model_config.num_layers
         )
         prefill_max_batch_size_per_gpu = int(
             memory_left / prefill_activation_memory_batch_size_1
@@ -1404,7 +1405,6 @@ class LLMAnalysis:
                 is_inference=True,
                 layernorm_dtype_bytes=layernorm_dtype_bytes,
             )
-            * self.model_config.num_layers
         )
         logger.info(
             "prefill_activation_memory_per_gpu with batch_size_per_gpu"
@@ -1481,8 +1481,6 @@ class LLMAnalysis:
                 f" {_num_to_string(kv_cache_memory_per_gpu)}B,"
                 " decode_activation_memory_per_gpu:"
                 f" {_num_to_string(decode_activation_memory_per_gpu)}B"
-                f" ({_num_to_string(decode_activation_memory_per_layer)}B *"
-                f" {num_layers_per_gpu})"
             )
 
             decode_max_batch_size_per_gpu = int(
@@ -1507,7 +1505,6 @@ class LLMAnalysis:
                 " decode_max_batch_size_per_gpu:"
                 f" {decode_max_batch_size_per_gpu}"
             )
-
         else:
             decode_activation_memory_batch_size_1 = (
                 self.get_memory_activation_per_layer(
@@ -1516,7 +1513,6 @@ class LLMAnalysis:
                     is_inference=True,
                     layernorm_dtype_bytes=layernorm_dtype_bytes,
                 )
-                * num_layers_per_gpu
             )
             decode_max_batch_size_per_gpu = int(
                 memory_left / decode_activation_memory_batch_size_1
@@ -1583,15 +1579,17 @@ class LLMAnalysis:
             "num_tokens_to_generate": num_tokens_to_generate,
             "flops_efficiency": self.flops_efficiency,
             "hbm_memory_efficiency": self.hbm_memory_efficiency,
-            "use_kv_cache": use_kv_cache,
-            "kv_cache_memory_per_gpu": kv_cache_memory_per_gpu,
-            "kv_cache_latency": kv_cache_latency,
             "layernorm_dtype_bytes": layernorm_dtype_bytes,
+            "use_kv_cache": use_kv_cache,
+            "kv_cache_latency": kv_cache_latency,
+            "kv_cache_memory_per_gpu": kv_cache_memory_per_gpu,
             "embedding_memory_per_gpu": embedding_memory_per_gpu,
             "weight_memory_per_gpu": weight_memory_per_gpu,
+            "prefill_activation_memory_per_gpu": prefill_activation_memory_per_gpu,
             "prefill_max_batch_size_per_gpu": prefill_max_batch_size_per_gpu,
             "prefill_activation_memory_per_gpu": prefill_activation_memory_per_gpu,
             "prefill_num_flops_fwd_total": prefill_num_flops_fwd_total,
+            "decode_activation_memory_per_gpu": decode_activation_memory_per_gpu,
             "decode_max_batch_size_per_gpu": decode_max_batch_size_per_gpu,
             "decode_activation_memory_per_gpu": decode_activation_memory_per_gpu,
             "decode_num_flops_fwd_total": decode_num_flops_fwd_total,
@@ -1852,7 +1850,7 @@ class LLMAnalysis:
         )
 
         # With pipeline parallelism, each stage contains L/p layers so the first stage must store p ×L/p = L layers worth of activations regardless of the pipeline parallel size p; activation memory required for the input embeddings, the last layer-norm, and the output layer are ignored here. Refer to https://arxiv.org/abs/2205.05198 for more details.
-        activation_memory_bs1 = (
+        activation_memory_batch_size_1 = (
             self.get_memory_activation_per_layer(
                 1,
                 seq_len,
@@ -1862,9 +1860,9 @@ class LLMAnalysis:
             )
             * self.model_config.num_layers
         )
-        max_batch_size_per_gpu = int(memory_left // activation_memory_bs1)
+        max_batch_size_per_gpu = int(memory_left // activation_memory_batch_size_1)
         logger.info(
-            f"activation_memory_batch_size_1:{_num_to_string(activation_memory_bs1)}B,"
+            f"activation_memory_batch_size_1:{_num_to_string(activation_memory_batch_size_1)}B,"
             f" max_batch_size_per_gpu: {max_batch_size_per_gpu}"
         )
 
@@ -2042,7 +2040,7 @@ class LLMAnalysis:
             "weight_memory_per_gpu": weight_memory_per_gpu,
             "gradient_memory_per_gpu": gradient_memory_per_gpu,
             "optimizer_state_memory_per_gpu": optimizer_state_memory_per_gpu,
-            "activation_memory_bs1": activation_memory_bs1,
+            "activation_memory_batch_size_1": activation_memory_batch_size_1,
             "activation_memory_per_gpu": activation_memory_per_gpu,
             "latency_per_micro_batch": latency_per_micro_batch,
             "latency_fwd": latency_fwd,
@@ -2076,7 +2074,7 @@ def infer(
     dp_size: int = 1,
     tp_size: int = 1,
     pp_size: int = 1,
-    sp_size: int = 1,
+    sp_size: int = None,
     seq_len=512,
     num_tokens_to_generate=32,
     use_kv_cache: bool = True,
@@ -2104,7 +2102,7 @@ def infer(
         dp_size (int, optional): data parallelism size. Defaults to None.
         tp_size (int, optional): tensor parallelism size. Defaults to 1.
         pp_size (int, optional): pipeline parallelism size. Defaults to 1.
-        sp_size (int, optional): sequence parallelism size. Defaults to 1.
+        sp_size (int, optional): sequence parallelism size. Defaults to tp_size.
         seq_len (int, optional): input sequence length. Defaults to 512.
         num_tokens_to_generate (int, optional): number of tokens to generate for generative models. Defaults to 32.
         use_kv_cache (bool, optional): whether to use kv cache. Defaults to True.
@@ -2127,7 +2125,7 @@ def infer(
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
     parallel_config = ParallelismConfig(
-        tp_size=tp_size, pp_size=pp_size, sp_size=sp_size, dp_size=dp_size
+        tp_size=tp_size, pp_size=pp_size, sp_size=sp_size if sp_size else tp_size, dp_size=dp_size
     )
 
     logger.setLevel(logging.getLevelName(log_level))
@@ -2145,7 +2143,7 @@ def infer(
         inter_node_memory_efficiency=inter_node_memory_efficiency,
     )
 
-    sumary_dict = analysis.inference(
+    summary_dict = analysis.inference(
         batch_size_per_gpu=batch_size_per_gpu,
         seq_len=seq_len,
         num_tokens_to_generate=num_tokens_to_generate,
@@ -2158,7 +2156,7 @@ def infer(
         output_file_suffix=output_file_suffix,
     )
 
-    return sumary_dict
+    return summary_dict
 
 
 def train(
@@ -2176,7 +2174,7 @@ def train(
     dp_size: int = None,
     tp_size: int = 1,
     pp_size: int = 1,
-    sp_size: int = 1,
+    sp_size: int = None,
     total_num_gpus: int = None,
     layernorm_dtype_bytes: int = BYTES_FP32,
     achieved_tflops: float = None,
@@ -2206,7 +2204,7 @@ def train(
         dp_size (int, optional): data parallelism size. Defaults to None.
         tp_size (int, optional): tensor parallelism size. Defaults to 1.
         pp_size (int, optional): pipeline parallelism size. Defaults to 1.
-        sp_size (int, optional): sequence parallelism size. Defaults to 1.
+        sp_size (int, optional): sequence parallelism size. Defaults to tp_size.
         total_num_gpus (int, optional): total number of GPUs used for training. Defaults to None.
         layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Often has to be FP32 in training to maintain model accuracy. Defaults to BYTES_FP32.
         achieved_tflops (float, optional): achieved TFLOPS per GPU. Defaults to None.
@@ -2246,7 +2244,7 @@ def train(
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
     parallel_config = ParallelismConfig(
-        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size, sp_size=sp_size
+        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size, sp_size=sp_size if sp_size else tp_size
     )
 
     analysis = LLMAnalysis(
