@@ -8,7 +8,7 @@
 
 ## Inference with Llama 2 70B
 
-The Appendix of [Why GPT-3.5 is (mostly) cheaper than Llama 2](`https://www.cursor.so/blog/llama-inference`) reports measurements with  `Llama-2-70B` on 2 A100-80GB GPUs. The tables below show llm-anlaysis results using the experiment setups with different efficiency numbers.
+The Appendix of [Why GPT-3.5 is (mostly) cheaper than Llama 2](https://www.cursor.so/blog/llama-inference) reports measurements with  `Llama-2-70B` on 2 A100-80GB GPUs. The tables below show llm-anlaysis results using the experiment setups with different efficiency numbers.
 The cost per GPU hour uses `$2.21`. For other details, check `run_infer_cursor.py`.
 
 - `flops_efficiency=0.6 and hbm_memory_efficiency=0.6`
