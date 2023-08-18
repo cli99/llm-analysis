@@ -107,8 +107,11 @@ class ParallelismConfig:
     dp_size: int = (
         1  # data parallelism size, DeepSpeed Zero parallelism implementation
     )
-    sp_size: int = 1  # sequence parallelism size, Megatron-LM sequence parallelism implementation
+    sp_size: int = None  # sequence parallelism size, Megatron-LM sequence parallelism implementation
 
+    def __post_init__(self):
+        if self.sp_size is None:
+            self.sp_size = self.tp_size
 
 # model name and configurations mapping populated from MODEL_CONFIG_DIR_NAME
 model_configs = {}
@@ -158,14 +161,34 @@ def get_model_config_from_hf(
         )
         return None
     hf_config = AutoConfig.from_pretrained(name, trust_remote_code=True)
+    if hasattr(hf_config, "num_hidden_layers"):
+        num_layers = hf_config.num_hidden_layers
+    elif hasattr(hf_config, "n_layers"):
+        num_layers = hf_config.n_layers
+    else:
+        raise Exception("hf config does not have num_hidden_layers or n_layers, check the config.json file")
+    if hasattr(hf_config, "num_attention_heads"):
+        n_head = hf_config.num_attention_heads
+    elif hasattr(hf_config, "n_heads"):
+        n_head = hf_config.n_heads
+    else:
+        raise Exception("hf config does not have num_attention_heads or n_heads, check the config.json file")
+
+    if hasattr(hf_config, "hidden_size"):
+        hidden_dim = hf_config.hidden_size
+    elif hasattr(hf_config, "d_model"):
+        hidden_dim = hf_config.d_model
+    else:
+        raise Exception("hf config does not have hidden_size or d_model, check the config.json file")
+
     config = ModelConfig(
         name=canonical_model_name(name),
         max_seq_len=hf_config.max_position_embeddings
         if hasattr(hf_config, "max_position_embeddings")
         else None,
-        num_layers=hf_config.num_hidden_layers,
-        n_head=hf_config.num_attention_heads,
-        hidden_dim=hf_config.hidden_size,
+        num_layers=num_layers,
+        n_head=n_head,
+        hidden_dim=hidden_dim,
         vocab_size=hf_config.vocab_size,
         model_type=hf_config.model_type
         if hasattr(hf_config, "model_type")

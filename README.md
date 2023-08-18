@@ -35,12 +35,12 @@ llm-analysis helps answer questions such as:
 ### Examples (updating)
 
 Check the example use cases. With llm-analysis, you can do such analysis in minutes :rocket:!
+- [Llama 2 Models](examples/llama2)
 - [LLaMA Models](examples/llama)
 - [Megatron-LM Models](examples/megatron-lm/)
 - [Megatron Turing NLG 530B](examples/megatron-turing-nlg)
 - [FasterTransformer](examples/fastertransformer/)
-- OPT Models (WIP)
-- BLOOM Models (WIP)
+
 ## Quick Start
 
 - To install llm-analysis from pypi:
@@ -135,15 +135,11 @@ Check the TODOs below for what's next and stay tuned :radio:!
 
 The following features/improvements are on the roadmap. Stay tuned, and any contributions are welcome! :smile:
 
-- [ ] Add more model case studies
 - [ ] Add scripts to benchmark and profile the latency, FLOPS and memory efficiency in real workloads
-- [ ] Improve the analytical model for inference
 - [ ] Support efficient fine-tuning methods such as [LoRA](https://github.com/microsoft/LoRA) or [Adapters](https://arxiv.org/abs/2303.16199)
 - [ ] Support other optimizers in training analysis
-- [ ] Add pp (across nodes) and dp (across and within a node) communications analysis
 - [ ] Add configuration/optimization advising
-- [ ] An interactive web UI with data visualization
-- [ ] Support other model architectures beyond encoders and decoders
+- [ ] Add pp (across nodes) and dp (across and within a node) communications analysis
 - [ ] Support CPU offloading (weight, kv cache, etc.) analysis in training and inference
 - [ ] Support sparse model inference
 - [ ] Support CPU for inference analysis
