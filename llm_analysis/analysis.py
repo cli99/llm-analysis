@@ -1474,7 +1474,7 @@ class LLMAnalysis:
             )
             decode_activation_memory_per_gpu = (
                 decode_activation_memory_per_layer
-            )
+            ) * num_layers_per_gpu
 
             logger.info(
                 "kv_cache_memory_per_gpu:"
@@ -1540,7 +1540,8 @@ class LLMAnalysis:
             )
             decode_activation_memory_per_gpu = (
                 decode_activation_memory_per_layer
-            )
+            ) * num_layers_per_gpu
+
             kv_cache_memory_per_gpu = 0
             kv_cache_latency = 0
 
