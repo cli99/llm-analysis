@@ -302,7 +302,7 @@ class LLMAnalysis:
         Returns:
             int: the number of parameters in the two MLP linear layers
         """
-        return 8 * self.model_config.hidden_dim**2  # 4+4
+        return 2 * self.model_config.hidden_dim*self.model_config.ffn_embed_dim
 
     def get_num_params_per_layer(self) -> int:
         """Get the number of parameters in a transformer layer, including the
