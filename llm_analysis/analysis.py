@@ -293,7 +293,8 @@ class LLMAnalysis:
         Returns:
             int: the number of parameters in the attention linear layers
         """
-        return 4 * self.model_config.hidden_dim**2
+        num_heads_per_gpu = max(self.model_config.num_key_value_heads / self.parallelism_config.tp_size, 1) # At least on attention head on each tensor-parallel GPU
+        return self.model_config.hidden_dim**2 + self.model_config.hidden_dim**2 + 2*self.model_config.hidden_dim*(self.model_config.hidden_dim * self.model_config.num_key_value_head /self.model_config.n_head)
 
     def get_num_params_per_layer_mlp(self) -> int:
         """Get the number of parameters in the MLP linear layers, including the
@@ -302,7 +303,7 @@ class LLMAnalysis:
         Returns:
             int: the number of parameters in the two MLP linear layers
         """
-        return 2 * self.model_config.hidden_dim*self.model_config.ffn_embed_dim
+        return 2 * self.model_config.hidden_dim*self.model_config.ffn_embed_dim*self.model_config.moe_num_experts
 
     def get_num_params_per_layer(self) -> int:
         """Get the number of parameters in a transformer layer, including the
@@ -316,6 +317,20 @@ class LLMAnalysis:
             self.get_num_params_per_layer_attn()
             + self.get_num_params_per_layer_mlp()
         )
+
+    def get_num_active_params_per_layer(self) -> int:
+        """Get the number of active parameters in a transformer layer, including the
+        attention and MoE MLP linear layers.
+
+        Returns:
+            int: the number of parameters in a transformer layer
+        """
+
+        return (
+            self.get_num_params_per_layer_attn()
+            + self.get_num_params_per_layer_mlp()*self.model_config.moe_top_k/self.model_config.moe_num_experts
+        )
+
 
     def get_num_params_total(self) -> int:
         """Get the total number of parameters in the model, including all the
@@ -348,7 +363,7 @@ class LLMAnalysis:
             self.get_num_params_per_layer()
             * self.dtype_config.weight_bits
             / BITS_PER_BYTE
-            / self.parallelism_config.tp_size
+            / self.parallelism_config.tp_size / self.parallelism_config.ep_size
         )
         if ds_zero == DSZeRO.STAGE_3:
             memory_weight_per_layer /= self.parallelism_config.dp_size
@@ -526,6 +541,7 @@ class LLMAnalysis:
         """
         tp_size = self.parallelism_config.tp_size
         sp_size = self.parallelism_config.sp_size
+        ep_size = self.parallelism_config.ep_size
         hidden_dim = self.model_config.hidden_dim
         bytes_per_activation = (
             self.dtype_config.activation_bits / BITS_PER_BYTE
