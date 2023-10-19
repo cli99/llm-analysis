@@ -294,7 +294,7 @@ class LLMAnalysis:
             int: the number of parameters in the attention linear layers
         """
         num_heads_per_gpu = max(self.model_config.num_key_value_heads / self.parallelism_config.tp_size, 1) # At least on attention head on each tensor-parallel GPU
-        return self.model_config.hidden_dim**2 + self.model_config.hidden_dim**2 + 2*self.model_config.hidden_dim*(self.model_config.hidden_dim * self.model_config.num_key_value_head /self.model_config.n_head)
+        return self.model_config.hidden_dim**2 + self.model_config.hidden_dim**2 + 2*self.model_config.hidden_dim*(self.model_config.hidden_dim * self.model_config.num_key_value_heads /self.model_config.n_head)
 
     def get_num_params_per_layer_mlp(self) -> int:
         """Get the number of parameters in the MLP linear layers, including the
@@ -304,6 +304,15 @@ class LLMAnalysis:
             int: the number of parameters in the two MLP linear layers
         """
         return 2 * self.model_config.hidden_dim*self.model_config.ffn_embed_dim*self.model_config.moe_num_experts
+
+    def get_num_params_per_layer_router(self)->int:
+        if self.model_config.moe_num_experts > 1:
+            return self.model_config.hidden_dim * self.model_config.moe_num_experts
+        else:
+            return 0
+
+    def get_num_params_per_layer_layernorm(self) -> int:
+        return 2 * self.model_config.hidden_dim
 
     def get_num_params_per_layer(self) -> int:
         """Get the number of parameters in a transformer layer, including the
@@ -315,7 +324,7 @@ class LLMAnalysis:
 
         return (
             self.get_num_params_per_layer_attn()
-            + self.get_num_params_per_layer_mlp()
+            + self.get_num_params_per_layer_mlp() + self.get_num_params_per_layer_router() + self.get_num_params_per_layer_layernorm()
         )
 
     def get_num_active_params_per_layer(self) -> int:
@@ -329,6 +338,7 @@ class LLMAnalysis:
         return (
             self.get_num_params_per_layer_attn()
             + self.get_num_params_per_layer_mlp()*self.model_config.moe_top_k/self.model_config.moe_num_experts
+            +  self.get_num_params_per_layer_router() + self.get_num_params_per_layer_layernorm()
         )
 
 
@@ -341,7 +351,7 @@ class LLMAnalysis:
         """
         return (
             self.model_config.num_layers * self.get_num_params_per_layer()
-            + self.get_num_params_embedding()
+            + self.get_num_params_embedding() + self.get_num_params_per_layer_layernorm()
         )
 
     def get_memory_weight_per_layer(
@@ -360,10 +370,13 @@ class LLMAnalysis:
             float: the memory (in bytes) required to store the weights of a transformer layer
         """
         memory_weight_per_layer = (
-            self.get_num_params_per_layer()
+            (
+            self.get_num_params_per_layer_attn()
+            + self.get_num_params_per_layer_mlp() / self.parallelism_config.ep_size + self.get_num_params_per_layer_router() + self.get_num_params_per_layer_layernorm()
+            )
             * self.dtype_config.weight_bits
             / BITS_PER_BYTE
-            / self.parallelism_config.tp_size / self.parallelism_config.ep_size
+            / self.parallelism_config.tp_size
         )
         if ds_zero == DSZeRO.STAGE_3:
             memory_weight_per_layer /= self.parallelism_config.dp_size
@@ -509,7 +522,7 @@ class LLMAnalysis:
 
         memory_activation_per_layer_attn = (
             (1 * seq_len * batch_size * hidden_dim / sp_size)
-            + (4 * seq_len * batch_size * hidden_dim / tp_size)
+            + (+2*self.model_config.num_key_value_heads/self.model_config.n_head)*(seq_len * batch_size * hidden_dim / tp_size)
             + selective_compute_elems
         ) * bytes_per_activation + drop_out_masks
 
@@ -557,11 +570,16 @@ class LLMAnalysis:
             seq_len * batch_size * hidden_dim / sp_size
         )
 
-        memory_activation_per_layer_mlp = (
-            (1 * seq_len * batch_size * hidden_dim / sp_size)
-            + (8 * seq_len * batch_size * hidden_dim / tp_size)
-        ) * bytes_per_activation + drop_out_mask
-
+        if self.model_config.moe_num_experts == 1:
+            memory_activation_per_layer_mlp = (
+                (1 * seq_len * batch_size * hidden_dim / sp_size)
+                + (2 * seq_len * batch_size * hidden_dim * self.model_config.expansion_ratio / tp_size)
+            ) * bytes_per_activation + drop_out_mask
+        else:
+            memory_activation_per_layer_mlp = self.model_config.moe_top_k *(
+                (1 * seq_len * batch_size * hidden_dim / sp_size)
+                + (2 * seq_len * batch_size * hidden_dim * self.model_config.expansion_ratio * self.model_config.moe_num_experts/ ep_size / tp_size)
+            ) * bytes_per_activation + drop_out_mask
         return memory_activation_per_layer_mlp
 
     def get_memory_activation_per_layer_layernorm(
@@ -1272,7 +1290,7 @@ class LLMAnalysis:
         logger.info(config_str)
 
     def get_configs_desc(self) -> str:
-        return f"{self.model_config.name}-{self.gpu_config.name}-{self.dtype_config.name}-tp{self.parallelism_config.tp_size}-pp{self.parallelism_config.pp_size}-dp{self.parallelism_config.dp_size}-sp{self.parallelism_config.sp_size}-fe{round(self.flops_efficiency, 2)}-hbme{round(self.hbm_memory_efficiency, 2)}"
+        return f"{self.model_config.name}-{self.gpu_config.name}-{self.dtype_config.name}-tp{self.parallelism_config.tp_size}-pp{self.parallelism_config.pp_size}-dp{self.parallelism_config.dp_size}-sp{self.parallelism_config.sp_size}-fe{round(self.flops_efficiency, 2)}-ep{self.parallelism_config.ep_size}-hbme{round(self.hbm_memory_efficiency, 2)}"
 
     def get_readable_summary_dict(
         self, summary_dict: dict, title="Summary"
@@ -1282,7 +1300,7 @@ class LLMAnalysis:
             if "num_tokens" in key or "num_params" in key or "flops" in key:
                 log_str += f"{key}: {_num_to_string(value)}\n"
             elif "gpu_hours" == key:
-                log_str += f"{key}: {int(value)}\n"
+                log_str += f"{key}: {int(value)}\n" if value else ""
             elif "memory" in key and "efficiency" not in key:
                 log_str += f"{key}: {_num_to_string(value)}B\n"
             elif "latency" in key:
@@ -1591,6 +1609,7 @@ class LLMAnalysis:
             "batch_size_per_gpu": batch_size_per_gpu,
             "seq_len": seq_len,
             "tp_size": self.parallelism_config.tp_size,
+            "ep_size": self.parallelism_config.ep_size,
             "pp_size": self.parallelism_config.pp_size,
             "num_tokens_to_generate": num_tokens_to_generate,
             "flops_efficiency": self.flops_efficiency,
@@ -1775,6 +1794,7 @@ class LLMAnalysis:
         ds_zero: DSZeRO = DSZeRO.NONE,
         layernorm_dtype_bytes: int = BYTES_FP32,
         output_dir: str = None,
+        output_file_suffix: str = "",
     ) -> dict:
         """Training analysis given the configs and inputs.
 
@@ -1878,7 +1898,7 @@ class LLMAnalysis:
         )
         max_batch_size_per_gpu = int(memory_left // activation_memory_batch_size_1)
         logger.info(
-            f"activation_memory_batch_size_1:{_num_to_string(activation_memory_batch_size_1)}B,"
+            f"activation_memory_batch_size_1: {_num_to_string(activation_memory_batch_size_1)}B,"
             f" max_batch_size_per_gpu: {max_batch_size_per_gpu}"
         )
 
@@ -2041,6 +2061,7 @@ class LLMAnalysis:
             "tp_size": self.parallelism_config.tp_size,
             "pp_size": self.parallelism_config.pp_size,
             "sp_size": self.parallelism_config.sp_size,
+            "ep_size": self.parallelism_config.ep_size,
             "ds_zero": DSZeRO(ds_zero).name,
             "total_num_gpus": total_num_gpus,
             "seq_len": seq_len,
@@ -2074,7 +2095,7 @@ class LLMAnalysis:
 
         if output_dir is not None:
             self.output_summary_dict(
-                summary_dict, output_dir, print_human_readable=True
+                summary_dict, output_dir, print_human_readable=True, output_file_suffix=output_file_suffix
             )
 
         return summary_dict
@@ -2191,6 +2212,7 @@ def train(
     tp_size: int = 1,
     pp_size: int = 1,
     sp_size: int = None,
+    ep_size: int = 1,
     total_num_gpus: int = None,
     layernorm_dtype_bytes: int = BYTES_FP32,
     achieved_tflops: float = None,
@@ -2200,6 +2222,7 @@ def train(
     inter_node_memory_efficiency=INTER_NODE_MEMORY_EFFICIENCY,
     num_gpus_per_node: int = NUM_GPUS_PER_NODE,
     output_dir: str = None,
+    output_file_suffix: str = "",
 ) -> dict:
     """Entry point function of training analysis for the command line
     interface. This uses pre-defined name-to-configuration mapping and common
@@ -2260,7 +2283,7 @@ def train(
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
     parallel_config = ParallelismConfig(
-        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size, sp_size=sp_size if sp_size else tp_size
+        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size, sp_size=sp_size if sp_size else tp_size, ep_size=ep_size
     )
 
     analysis = LLMAnalysis(
@@ -2287,6 +2310,7 @@ def train(
         ds_zero=DSZeRO(ds_zero),
         layernorm_dtype_bytes=layernorm_dtype_bytes,
         output_dir=output_dir,
+        output_file_suffix=output_file_suffix,
     )
 
     return summary_dict

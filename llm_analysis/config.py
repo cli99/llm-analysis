@@ -116,14 +116,12 @@ class ParallelismConfig:
     dp_size: int = (
         1  # data parallelism size, DeepSpeed Zero parallelism implementation
     )
+    ep_size: int = 1 # expert parallelism size
     sp_size: int = None  # sequence parallelism size, Megatron-LM sequence parallelism implementation
-    ep_size: int = None # expert parallelism size
 
     def __post_init__(self):
         if self.sp_size is None:
             self.sp_size = self.tp_size
-        if self.ep_size is None:
-            self.ep_size = 1
 
 # model name and configurations mapping populated from MODEL_CONFIG_DIR_NAME
 model_configs = {}
