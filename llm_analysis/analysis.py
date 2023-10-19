@@ -294,7 +294,8 @@ class LLMAnalysis:
             int: the number of parameters in the attention linear layers
         """
         num_heads_per_gpu = max(self.model_config.num_key_value_heads / self.parallelism_config.tp_size, 1) # At least on attention head on each tensor-parallel GPU
-        return self.model_config.hidden_dim**2 + self.model_config.hidden_dim**2 + 2*self.model_config.hidden_dim*(self.model_config.hidden_dim * self.model_config.num_key_value_heads /self.model_config.n_head)
+        num_key_value_heads = num_heads_per_gpu * self.parallelism_config.tp_size
+        return 2 * self.model_config.hidden_dim**2 + 2*self.model_config.hidden_dim*(self.model_config.hidden_dim * num_key_value_heads /self.model_config.n_head)
 
     def get_num_params_per_layer_mlp(self) -> int:
         """Get the number of parameters in the MLP linear layers, including the
