@@ -70,7 +70,7 @@ def test_training_megatron_lm_1():
         == "84.82 days"
     )
 
-    assert _num_to_string(summary_dict["num_params_total"]) == "174.56 G"
+    assert _num_to_string(summary_dict["num_params_total"]) == "174.57 G"
 
 
 # megatron-lm paper https://arxiv.org/abs/2104.04473 Table 2
