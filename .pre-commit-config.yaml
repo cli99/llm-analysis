@@ -21,9 +21,9 @@ repos:
       - id: flake8
         args:
           [
-            '--ignore=E,F403,F405,F541,F841,W',
-            '--select=E9,F,W6',
-            '--per-file-ignores=__init__.py:F401',
+            "--ignore=E,F403,F405,F541,F841,W",
+            "--select=E9,F,W6",
+            "--per-file-ignores=__init__.py:F401",
           ]
   - repo: https://github.com/codespell-project/codespell
     rev: v2.1.0
@@ -31,9 +31,9 @@ repos:
       - id: codespell
         args: [
             # Do not check files that are automatically generated
-            '--skip=docs/Gemfile.lock,tests/unit/gpt2-merges.txt,tests/unit/gpt2-vocab.json',
+            "--skip=docs/Gemfile.lock,tests/unit/gpt2-merges.txt,tests/unit/gpt2-vocab.json",
             '--ignore-regex=\\n', # Do not count the 'n' in an escaped newline as part of a word
-            '--ignore-words-list=unsupport', # Word used in error messages that need rewording
+            "--ignore-words-list=unsupport", # Word used in error messages that need rewording
             --check-filenames,
             --check-hidden,
           ]

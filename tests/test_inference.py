@@ -80,5 +80,5 @@ def test_llama2_70b():
     )
 
     assert within_range(
-        summary_dict["total_decode_latency"], 17.05, TOLERANCE
+        summary_dict["total_decode_latency"], 14.79, TOLERANCE
     )

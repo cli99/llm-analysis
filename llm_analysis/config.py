@@ -57,13 +57,22 @@ class ModelConfig:
     ffn_embed_dim: int = (
         None  # hidden dimension of FFN, default to 4 * hidden_dim
     )
+    expansion_ratio: int = None
     model_type: str = (
         None  # model type as tagged on Hugging Face (e.g., gpt2, opt, llama.)
     )
+    moe_num_experts: int = 1 # number of experts for mixture of experts model
+    moe_top_k: int = 1 # top k experts for mixture of experts model
 
     def __post_init__(self):
-        if self.ffn_embed_dim is None:
+        if self.ffn_embed_dim is None and self.expansion_ratio is None:
             self.ffn_embed_dim = self.hidden_dim * 4
+        elif self.ffn_embed_dim is None:
+            self.ffn_embed_dim = self.hidden_dim * self.expansion_ratio
+        elif self.expansion_ratio is None:
+            assert self.ffn_embed_dim % self.hidden_dim == 0, f"ffn_embed_dim ({self.ffn_embed_dim}) must be divisible by hidden_dim ({self.hidden_dim})"
+            self.expansion_ratio = self.ffn_embed_dim / self.hidden_dim
+
         if self.num_key_value_heads is None:
             self.num_key_value_heads = self.n_head
         assert self.n_head % self.num_key_value_heads == 0, f"n_head ({self.n_head}) must be divisible by num_key_value_heads ({self.num_key_value_heads})"
@@ -107,6 +116,7 @@ class ParallelismConfig:
     dp_size: int = (
         1  # data parallelism size, DeepSpeed Zero parallelism implementation
     )
+    ep_size: int = 1 # expert parallelism size
     sp_size: int = None  # sequence parallelism size, Megatron-LM sequence parallelism implementation
 
     def __post_init__(self):
