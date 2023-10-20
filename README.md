@@ -65,7 +65,7 @@ To integrate llm-analysis in your code, use the `LLMAnalysis` class. Refer to do
 - `ModelConfig` covers model information, i.e. max sequence length, number of transformer layers, number of attention heads, hidden dimension, vocabulary size
 - `GPUConfig` covers GPU compute and memory specifications
 - `DtypeConfig` covers the number of bits used for the model weight, activation, and embedding
-- `ParallelismConfig` covers Tensor Parallelism (`tp`), Pipeline Parallelism (`pp`), Sequence Parallelism (`sp`), and Data Parallelism (`dp`).
+- `ParallelismConfig` covers Tensor Parallelism (`tp`), Pipeline Parallelism (`pp`), Sequence Parallelism (`sp`), Expert Parallelism (`ep`),and Data Parallelism (`dp`).
 
 Then `LLMAnalysis` can be queried with different arguments through the [training](https://llm-analysis.readthedocs.io/en/latest/analysis.html#llm_analysis.analysis.LLMAnalysis.training) and [inference](https://llm-analysis.readthedocs.io/en/latest/analysis.html#llm_analysis.analysis.LLMAnalysis.inference) methods.
 ### Using the Entry Point Functions for Command Line

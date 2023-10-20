@@ -658,7 +658,7 @@ class LLMAnalysis:
             float: the memory (in bytes) required  to store the activations of a transformer layer
         """
         if (not is_inference) and activation_recomputation == ActivationRecomputation.FULL:
-            return (
+            memory_activation_per_layer = (
                 seq_len
                 * batch_size
                 * self.model_config.hidden_dim
@@ -666,6 +666,10 @@ class LLMAnalysis:
                 / BITS_PER_BYTE
                 / self.parallelism_config.tp_size
             )
+            if return_breakdown:
+                return memory_activation_per_layer, 0, 0, 0
+            else:
+                return memory_activation_per_layer
 
         memory_activation_per_layer_attn = (
             self.get_memory_activation_per_layer_attn(
@@ -1411,7 +1415,7 @@ class LLMAnalysis:
             dtype_bytes=self.dtype_config.embedding_bits / BITS_PER_BYTE
         )
 
-        weight_memory_layers_per_gpu,  weight_memory_attn_per_gpu, weight_memory_mlp_per_gpu, weight_memory_layernorm_per_gpu= [x*self.model_config.num_layers for x in self.get_memory_weight_per_layer(ds_zero, return_breakdown=True)]
+        weight_memory_layers_per_gpu, weight_memory_attn_per_gpu, weight_memory_mlp_per_gpu, weight_memory_layernorm_per_gpu= [x*self.model_config.num_layers for x in self.get_memory_weight_per_layer(ds_zero, return_breakdown=True)]
 
         weight_memory_per_gpu = (
             weight_memory_layers_per_gpu
@@ -1868,7 +1872,7 @@ class LLMAnalysis:
         )
 
 
-        weight_memory_layers_per_gpu,  weight_memory_attn_per_gpu, weight_memory_mlp_per_gpu, weight_memory_layernorm_per_gpu= [x*self.model_config.num_layers for x in self.get_memory_weight_per_layer(ds_zero, return_breakdown=True)]
+        weight_memory_layers_per_gpu, weight_memory_attn_per_gpu, weight_memory_mlp_per_gpu, weight_memory_layernorm_per_gpu= [x*num_layers_per_gpu for x in self.get_memory_weight_per_layer(ds_zero, return_breakdown=True)]
 
         weight_memory_per_gpu = (
             weight_memory_layers_per_gpu
@@ -2287,8 +2291,11 @@ def train(
         tp_size (int, optional): tensor parallelism size. Defaults to 1.
         pp_size (int, optional): pipeline parallelism size. Defaults to 1.
         sp_size (int, optional): sequence parallelism size. Defaults to tp_size.
+        ep_size (int, optional): expert parallelism size. Defaults to 1.
         total_num_gpus (int, optional): total number of GPUs used for training. Defaults to None.
         layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Often has to be FP32 in training to maintain model accuracy. Defaults to BYTES_FP32.
+        mlp_activation_quant_bits (int, optional): number of bits for the quantized MLP activation. Defaults to None.
+        mlp_recompute_gelu (bool, optional): whether to recompute the GELU activation in the MLP backward pass. Defaults to False.
         achieved_tflops (float, optional): achieved TFLOPS per GPU. Defaults to None.
         flops_efficiency (float, optional): flops efficiency, ranging from 0 to 1. Defaults to None.
         hbm_memory_efficiency (float, optional): GPU HBM memory efficiency, ranging from 0 to 1. Defaults to HBM_MEMORY_EFFICIENCY.
