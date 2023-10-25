@@ -405,7 +405,7 @@ class LLMAnalysis:
         return memory_weight_per_layer
 
     def get_memory_optimizer_state_per_layer(
-        self, ds_zero: DSZeRO = DSZeRO.NONE
+        self, ds_zero: DSZeRO = DSZeRO.NONE, optimizer_state_bytes: int = None
     ) -> float:
         """Get the memory (in bytes) required  to store the optimizer states of
         a transformer layer, given the number of parameters in a transformer
@@ -424,12 +424,8 @@ class LLMAnalysis:
             float: the memory (in bytes) required  to store the optimizer state of a transformer layer
         """
         #
-        memory_optimizer_state_per_layer = (
-            4
-            * self.get_num_params_per_layer()
-            * BYTES_FP32
-            / self.parallelism_config.tp_size
-        )
+        memory_optimizer_state_per_layer = (4 * BYTES_FP32 if optimizer_state_bytes is None else optimizer_state_bytes) * self.get_num_params_per_layer() / self.parallelism_config.tp_size
+
         if ds_zero >= DSZeRO.STAGE_1:
             memory_optimizer_state_per_layer /= self.parallelism_config.dp_size
         return memory_optimizer_state_per_layer
@@ -1838,6 +1834,7 @@ class LLMAnalysis:
         activation_recomputation: ActivationRecomputation = ActivationRecomputation.NONE,
         ds_zero: DSZeRO = DSZeRO.NONE,
         layernorm_dtype_bytes: int = BYTES_FP32,
+        optimizer_state_bytes: int = None,
         mlp_activation_quant_bits: int = None,
         mlp_recompute_gelu: bool = False,
         mlp_gated_linear_units: bool = False,
@@ -1855,6 +1852,7 @@ class LLMAnalysis:
             activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
             ds_zero (DSZeRO, optional): which DeepSpeed ZeRO stage to use. Defaults to DSZeRO.NONE (disabled).
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Defaults to BYTES_FP32. Often has to be FP32 in training to maintain model accuracy.
+            optimizer_state_bytes (int, optional): number of bytes per model parameter for the optimizer state. Defaults to None, which assumes using 16-byte Adam optimizer (4B parameter + 4B gradient + 4B momentum + 4B variance):
             mlp_activation_quant_bits (int, optional): number of bits for quantizing the MLP activation. Defaults to None. Often has to be at least 8 in training to maintain model accuracy.
             mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
             mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
@@ -1905,7 +1903,7 @@ class LLMAnalysis:
         )
 
         optimizer_state_memory_per_gpu = (
-            self.get_memory_optimizer_state_per_layer(ds_zero)
+            self.get_memory_optimizer_state_per_layer(ds_zero, optimizer_state_bytes)
             * num_layers_per_gpu
         )
 
@@ -2289,6 +2287,7 @@ def train(
     ep_size: int = 1,
     total_num_gpus: int = None,
     layernorm_dtype_bytes: int = BYTES_FP32,
+    optimizer_state_bytes: int = None,
     mlp_activation_quant_bits: int = None,
     mlp_recompute_gelu: bool = False,
     mlp_gated_linear_units: bool = False,
@@ -2324,6 +2323,7 @@ def train(
         ep_size (int, optional): expert parallelism size. Defaults to 1.
         total_num_gpus (int, optional): total number of GPUs used for training. Defaults to None.
         layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Often has to be FP32 in training to maintain model accuracy. Defaults to BYTES_FP32.
+        optimizer_state_bytes (int, optional): number of bytes per model parameter for the optimizer state. Defaults to None, which assumes using 16-byte Adam optimizer (4B parameter + 4B gradient + 4B momentum + 4B variance):
         mlp_activation_quant_bits (int, optional): number of bits for the quantized MLP activation. Defaults to None.
         mlp_recompute_gelu (bool, optional): whether to recompute the GELU activation in the MLP backward pass. Defaults to False.
         mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
@@ -2390,6 +2390,7 @@ def train(
         ),
         ds_zero=DSZeRO(ds_zero),
         layernorm_dtype_bytes=layernorm_dtype_bytes,
+        optimizer_state_bytes=optimizer_state_bytes,
         mlp_activation_quant_bits=mlp_activation_quant_bits,
         mlp_recompute_gelu=mlp_recompute_gelu,
         mlp_gated_linear_units=mlp_gated_linear_units,
