@@ -558,6 +558,7 @@ class LLMAnalysis:
         activation_recomputation: ActivationRecomputation = ActivationRecomputation.NONE,
         activation_quant_bits: int = None,
         recompute_gelu: bool = False,
+        gated_linear_units: bool = False,
         with_dropout: bool = False,
     ) -> float:
         """Get the memory (in bytes) required  to store the activations of the
@@ -573,6 +574,9 @@ class LLMAnalysis:
             is_inference (bool, optional): whether it is inference or not. Defaults to True.
             activation_recomputation (ActivationRecomputation, optional): \
                 activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
+            activation_quant_bits (int, optional): number of bits to quantize activations
+            recompute_gelu (bool, optional): whether to recompute the gelu  in backward pass
+            gated_linear_units (bool, optional): whether to use gated linear units
 
         Returns:
             float: the memory (in bytes) required  to store the activations of the MLP in a transformer layer
@@ -601,12 +605,12 @@ class LLMAnalysis:
         if self.model_config.moe_num_experts == 1:
             memory_activation_per_layer_mlp = (
                 (1 * seq_len * batch_size * hidden_dim / sp_size)
-                + ((2 if not recompute_gelu else 1) * seq_len * batch_size * hidden_dim * self.model_config.expansion_ratio / tp_size)
+                + ((4/3 if recompute_gelu and gated_linear_units else (1 if recompute_gelu else 2)) * seq_len * batch_size * hidden_dim * self.model_config.expansion_ratio / tp_size)
             ) * bytes_per_activation + drop_out_mask
         else:
             memory_activation_per_layer_mlp = self.model_config.moe_top_k *(
                 (1 * seq_len * batch_size * hidden_dim / sp_size)
-                + ((2 if not recompute_gelu else 1) * seq_len * batch_size * hidden_dim * self.model_config.expansion_ratio * self.model_config.moe_num_experts/ ep_size / tp_size)
+                + ((4/3 if recompute_gelu and gated_linear_units else (1 if recompute_gelu else 2)) * seq_len * batch_size * hidden_dim * self.model_config.expansion_ratio * self.model_config.moe_num_experts/ ep_size / tp_size)
             ) * bytes_per_activation + drop_out_mask
 
         return memory_activation_per_layer_mlp
@@ -651,6 +655,7 @@ class LLMAnalysis:
         layernorm_dtype_bytes: int = BYTES_FP32,
         mlp_activation_quant_bits: int = None,
         mlp_recompute_gelu: bool = False,
+        mlp_gated_linear_units: bool = False,
         return_breakdown: bool = False,
     ) -> float:
         """Get the memory (in bytes) required to store the activations of a
@@ -667,6 +672,9 @@ class LLMAnalysis:
                 activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for \
                 the layernorm activations. Defaults to BYTES_FP32. Often has to be FP32 in training to maintain model accuracy.
+            mlp_activation_quant_bits (int, optional): number of bits for the quantized MLP activation. Defaults to None.
+            mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
+            mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
         Returns:
             float: the memory (in bytes) required  to store the activations of a transformer layer
         """
@@ -692,7 +700,7 @@ class LLMAnalysis:
 
         memory_activation_per_layer_mlp = (
             self.get_memory_activation_per_layer_mlp(
-                batch_size, seq_len, is_inference, activation_recomputation, activation_quant_bits=mlp_activation_quant_bits, recompute_gelu=mlp_recompute_gelu,
+                batch_size, seq_len, is_inference, activation_recomputation, activation_quant_bits=mlp_activation_quant_bits, recompute_gelu=mlp_recompute_gelu, gated_linear_units=mlp_gated_linear_units,
             )
         )
 
@@ -1832,6 +1840,7 @@ class LLMAnalysis:
         layernorm_dtype_bytes: int = BYTES_FP32,
         mlp_activation_quant_bits: int = None,
         mlp_recompute_gelu: bool = False,
+        mlp_gated_linear_units: bool = False,
         output_dir: str = None,
         output_file_suffix: str = "",
     ) -> dict:
@@ -1846,6 +1855,9 @@ class LLMAnalysis:
             activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
             ds_zero (DSZeRO, optional): which DeepSpeed ZeRO stage to use. Defaults to DSZeRO.NONE (disabled).
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Defaults to BYTES_FP32. Often has to be FP32 in training to maintain model accuracy.
+            mlp_activation_quant_bits (int, optional): number of bits for quantizing the MLP activation. Defaults to None. Often has to be at least 8 in training to maintain model accuracy.
+            mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
+            mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
             output_dir (str, optional): if set to a directory path, write the return summary dict out to the directory with the setup. Defaults to None.
 
         Returns:
@@ -1937,6 +1949,7 @@ class LLMAnalysis:
                 layernorm_dtype_bytes=layernorm_dtype_bytes,
                 mlp_activation_quant_bits=mlp_activation_quant_bits,
                 mlp_recompute_gelu=mlp_recompute_gelu,
+                mlp_gated_linear_units=mlp_gated_linear_units,
                 return_breakdown=True,
             )]
 
@@ -2278,6 +2291,7 @@ def train(
     layernorm_dtype_bytes: int = BYTES_FP32,
     mlp_activation_quant_bits: int = None,
     mlp_recompute_gelu: bool = False,
+    mlp_gated_linear_units: bool = False,
     achieved_tflops: float = None,
     flops_efficiency: float = None,
     hbm_memory_efficiency: float = HBM_MEMORY_EFFICIENCY,
@@ -2312,6 +2326,7 @@ def train(
         layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Often has to be FP32 in training to maintain model accuracy. Defaults to BYTES_FP32.
         mlp_activation_quant_bits (int, optional): number of bits for the quantized MLP activation. Defaults to None.
         mlp_recompute_gelu (bool, optional): whether to recompute the GELU activation in the MLP backward pass. Defaults to False.
+        mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
         achieved_tflops (float, optional): achieved TFLOPS per GPU. Defaults to None.
         flops_efficiency (float, optional): flops efficiency, ranging from 0 to 1. Defaults to None.
         hbm_memory_efficiency (float, optional): GPU HBM memory efficiency, ranging from 0 to 1. Defaults to HBM_MEMORY_EFFICIENCY.
@@ -2377,6 +2392,7 @@ def train(
         layernorm_dtype_bytes=layernorm_dtype_bytes,
         mlp_activation_quant_bits=mlp_activation_quant_bits,
         mlp_recompute_gelu=mlp_recompute_gelu,
+        mlp_gated_linear_units=mlp_gated_linear_units,
         output_dir=output_dir,
         output_file_suffix=output_file_suffix,
     )
