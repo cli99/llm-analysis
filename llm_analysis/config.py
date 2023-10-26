@@ -38,6 +38,7 @@ except ImportError:
 
 
 class EnhancedJSONEncoder(json.JSONEncoder):
+
     def default(self, o):
         if dataclasses.is_dataclass(o):
             return dataclasses.asdict(o)
@@ -52,7 +53,7 @@ class ModelConfig:
     hidden_dim: int  # hidden dimension
     vocab_size: int  # vocabulary size
     max_seq_len: int = None  # max sequence length
-    num_key_value_heads: int = None # the number of key value heads implementing Grouped Query Attention (GQA), If it is not specified, will default to n_head. If `num_key_value_heads=num_attention_heads`, the model will use Multi Head Attention (MHA), if `num_key_value_heads=1 the model will use Multi Query Attention (MQA) otherwise GQA is used. See https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/configuration_llama.py for details
+    num_key_value_heads: int = None  # the number of key value heads implementing Grouped Query Attention (GQA), If it is not specified, will default to n_head. If `num_key_value_heads=num_attention_heads`, the model will use Multi Head Attention (MHA), if `num_key_value_heads=1 the model will use Multi Query Attention (MQA) otherwise GQA is used. See https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/configuration_llama.py for details
     num_key_value_groups: int = None  # number of key value groups for GQA
     ffn_embed_dim: int = (
         None  # hidden dimension of FFN, default to 4 * hidden_dim
@@ -61,8 +62,8 @@ class ModelConfig:
     model_type: str = (
         None  # model type as tagged on Hugging Face (e.g., gpt2, opt, llama.)
     )
-    moe_num_experts: int = 1 # number of experts for mixture of experts model
-    moe_top_k: int = 1 # top k experts for mixture of experts model
+    moe_num_experts: int = 1  # number of experts for mixture of experts model
+    moe_top_k: int = 1  # top k experts for mixture of experts model
 
     def __post_init__(self):
         if self.ffn_embed_dim is None and self.expansion_ratio is None:
@@ -116,12 +117,13 @@ class ParallelismConfig:
     dp_size: int = (
         1  # data parallelism size, DeepSpeed Zero parallelism implementation
     )
-    ep_size: int = 1 # expert parallelism size
+    ep_size: int = 1  # expert parallelism size
     sp_size: int = None  # sequence parallelism size, Megatron-LM sequence parallelism implementation
 
     def __post_init__(self):
         if self.sp_size is None:
             self.sp_size = self.tp_size
+
 
 # model name and configurations mapping populated from MODEL_CONFIG_DIR_NAME
 model_configs = {}
@@ -147,15 +149,13 @@ def dump_configs(configs: dict, config_dir_name: str) -> None:
     """
     for k, v in configs.items():
         with open(
-            Path(__file__).parent / Path(config_dir_name, f"{k}.json"), "w"
-        ) as f:
+                Path(__file__).parent / Path(config_dir_name, f"{k}.json"),
+                "w") as f:
             json.dump(v, f, cls=EnhancedJSONEncoder, indent=4)
     logger.info(f"dumped {len(configs)} configs to {config_dir_name}")
 
 
-def get_model_config_from_hf(
-    name: str,
-) -> ModelConfig:
+def get_model_config_from_hf(name: str, ) -> ModelConfig:
     """Get model config from HuggingFace transformers library `AutoConfig`; if
     the model does not exist, try updating the transformers library.
 
@@ -176,34 +176,39 @@ def get_model_config_from_hf(
     elif hasattr(hf_config, "n_layers"):
         num_layers = hf_config.n_layers
     else:
-        raise Exception("hf config does not have num_hidden_layers or n_layers, check the config.json file")
+        raise Exception(
+            "hf config does not have num_hidden_layers or n_layers, check the config.json file"
+        )
     if hasattr(hf_config, "num_attention_heads"):
         n_head = hf_config.num_attention_heads
     elif hasattr(hf_config, "n_heads"):
         n_head = hf_config.n_heads
     else:
-        raise Exception("hf config does not have num_attention_heads or n_heads, check the config.json file")
+        raise Exception(
+            "hf config does not have num_attention_heads or n_heads, check the config.json file"
+        )
 
     if hasattr(hf_config, "hidden_size"):
         hidden_dim = hf_config.hidden_size
     elif hasattr(hf_config, "d_model"):
         hidden_dim = hf_config.d_model
     else:
-        raise Exception("hf config does not have hidden_size or d_model, check the config.json file")
+        raise Exception(
+            "hf config does not have hidden_size or d_model, check the config.json file"
+        )
 
     config = ModelConfig(
         name=canonical_model_name(name),
-        max_seq_len=hf_config.max_position_embeddings
-        if hasattr(hf_config, "max_position_embeddings")
-        else None,
+        max_seq_len=hf_config.max_position_embeddings if hasattr(
+            hf_config, "max_position_embeddings") else None,
         num_layers=num_layers,
         n_head=n_head,
         hidden_dim=hidden_dim,
         vocab_size=hf_config.vocab_size,
         model_type=hf_config.model_type
-        if hasattr(hf_config, "model_type")
-        else None,
-        num_key_value_heads=hf_config.num_key_value_heads if hasattr(hf_config, "num_key_value_heads") else None,
+        if hasattr(hf_config, "model_type") else None,
+        num_key_value_heads=hf_config.num_key_value_heads if hasattr(
+            hf_config, "num_key_value_heads") else None,
     )
     return config
 
@@ -283,16 +288,16 @@ def populate_model_and_gpu_configs() -> None:
     """Populate model, gpu, and data type configs from the pre-defined json
     files."""
     global model_configs, gpu_configs, dtype_configs
-    model_configs = read_configs(
-        Path(__file__).parent / Path(MODEL_CONFIG_DIR_NAME), type="model"
-    )
-    gpu_configs = read_configs(
-        Path(__file__).parent / Path(GPU_CONFIG_DIR_NAME), type="gpu"
-    )
+    model_configs = read_configs(Path(__file__).parent /
+                                 Path(MODEL_CONFIG_DIR_NAME),
+                                 type="model")
+    gpu_configs = read_configs(Path(__file__).parent /
+                               Path(GPU_CONFIG_DIR_NAME),
+                               type="gpu")
 
-    dtype_configs = read_configs(
-        Path(__file__).parent / Path(DTYPE_CONFIG_DIR_NAME), type="dtype"
-    )
+    dtype_configs = read_configs(Path(__file__).parent /
+                                 Path(DTYPE_CONFIG_DIR_NAME),
+                                 type="dtype")
     logger.info(
         f"Populated {len(model_configs)} model configs, {len(gpu_configs)} gpu configs, {len(dtype_configs)} dtype configs"
     )
@@ -340,9 +345,9 @@ def get_dtype_config_by_name(name: str) -> DtypeConfig:
     return dtype_configs[name]
 
 
-def dump_model_config_by_name(
-    name: str, config_dir_name: str = MODEL_CONFIG_DIR_NAME
-) -> None:
+def dump_model_config_by_name(name: str,
+                              config_dir_name: str = MODEL_CONFIG_DIR_NAME
+                              ) -> None:
     """Dump a model config from either the populated `model_configs` or Hugging
     Face by name to `config_dir_name`
 
@@ -388,22 +393,29 @@ def dump_hf_model_configs_by_type_and_task(
 
 populate_model_and_gpu_configs()
 
-
 if __name__ == "__main__":
     logger.setLevel(logging.getLevelName("INFO"))
     fire.Fire(
         {
-            "list_model_configs": list_model_configs,
-            "list_gpu_configs": list_gpu_configs,
-            "list_dtype_configs": list_dtype_configs,
-            "get_model_config_by_name": get_model_config_by_name,
-            "get_gpu_config_by_name": get_gpu_config_by_name,
-            "get_dtype_config_by_name": get_dtype_config_by_name,
-            "get_hf_models_by_type_and_task": get_hf_models_by_type_and_task,
-            "dump_model_config_by_name": dump_model_config_by_name,
-            "dump_hf_model_configs_by_type_and_task": dump_hf_model_configs_by_type_and_task,
+            "list_model_configs":
+            list_model_configs,
+            "list_gpu_configs":
+            list_gpu_configs,
+            "list_dtype_configs":
+            list_dtype_configs,
+            "get_model_config_by_name":
+            get_model_config_by_name,
+            "get_gpu_config_by_name":
+            get_gpu_config_by_name,
+            "get_dtype_config_by_name":
+            get_dtype_config_by_name,
+            "get_hf_models_by_type_and_task":
+            get_hf_models_by_type_and_task,
+            "dump_model_config_by_name":
+            dump_model_config_by_name,
+            "dump_hf_model_configs_by_type_and_task":
+            dump_hf_model_configs_by_type_and_task,
         },
         serialize=lambda x: json.dumps(x, cls=EnhancedJSONEncoder, indent=4)
-        if dataclasses.is_dataclass(x)
-        else x,
+        if dataclasses.is_dataclass(x) else x,
     )
