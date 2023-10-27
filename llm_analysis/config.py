@@ -157,8 +157,8 @@ def dump_configs(configs: dict, config_dir_name: str) -> None:
 
 
 def get_model_config_from_hf(name: str, ) -> ModelConfig:
-    """Get model config from HuggingFace transformers library `AutoConfig`; if
-    the model does not exist, try updating the transformers library.
+    """Get model config from HuggingFace transformers library `AutoConfig`; if the model
+    does not exist, try updating the transformers library.
 
     Args:
         name (str): the model id of a pretrained model configuration hosted inside a model repo on huggingface.co
@@ -242,8 +242,8 @@ def get_hf_models_by_type_and_task(
     top_k: int = 6,
     full_info: bool = False,
 ) -> list:
-    """Get a HuggingFace model name list by model type and task, filtered by
-    popularity (minimal number of downloads)
+    """Get a HuggingFace model name list by model type and task, filtered by popularity
+    (minimal number of downloads)
 
     Args:
         model_type (str, optional): model type, e.g., gpt, llama, opt, bloom. Defaults to "opt".
@@ -286,8 +286,7 @@ def get_hf_models_by_type_and_task(
 
 
 def populate_model_and_gpu_configs() -> None:
-    """Populate model, gpu, and data type configs from the pre-defined json
-    files."""
+    """Populate model, gpu, and data type configs from the pre-defined json files."""
     global model_configs, gpu_configs, dtype_configs
     model_configs = read_configs(Path(__file__).parent /
                                  Path(MODEL_CONFIG_DIR_NAME),
@@ -320,8 +319,8 @@ def list_dtype_configs() -> None:
 
 
 def get_model_config_by_name(name: str) -> ModelConfig:
-    """Get model config from the populated mapping by name, if not found, try
-    to get it from HuggingFace."""
+    """Get model config from the populated mapping by name, if not found, try to get it
+    from HuggingFace."""
     if name in model_configs:
         return model_configs[name]
     model_config = get_model_config_from_hf(name)
@@ -349,8 +348,8 @@ def get_dtype_config_by_name(name: str) -> DtypeConfig:
 def dump_model_config_by_name(name: str,
                               config_dir_name: str = MODEL_CONFIG_DIR_NAME
                               ) -> None:
-    """Dump a model config from either the populated `model_configs` or Hugging
-    Face by name to `config_dir_name`
+    """Dump a model config from either the populated `model_configs` or Hugging Face by
+    name to `config_dir_name`
 
     Args:
         name (str): model name, e,g., gpt2, facebook/opt-1.3b, decapoda-research/llama-7b-hf, etc.
@@ -368,8 +367,7 @@ def dump_hf_model_configs_by_type_and_task(
     top_k: int = 6,
     config_dir_name: str = MODEL_CONFIG_DIR_NAME,
 ) -> None:
-    """Dump model configs from HuggingFace by type and task to
-    `config_dir_name`
+    """Dump model configs from HuggingFace by type and task to `config_dir_name`
 
     Args:
         model_type (str, optional): model type, e.g., gpt, llama, opt, bloom. Defaults to "opt".

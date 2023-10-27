@@ -41,17 +41,16 @@ class ActivationRecomputation(Enum):
     """No activation recomputation; requires the most amount of memory."""
 
     SELECTIVE = 1
-    """Selectively checkpoints and recomputes only parts of each transformer
-    layer that take up a considerable amount of memory but are not
-    computationally expensive to recompute, i.e. QK^T matrix multiply, softmax,
-    softmax dropout, and attention over V."""
+    """Selectively checkpoints and recomputes only parts of each transformer layer that
+    take up a considerable amount of memory but are not computationally expensive to
+    recompute, i.e. QK^T matrix multiply, softmax, softmax dropout, and attention over
+    V."""
 
     FULL = 2
-    """Full activation recomputation stores the input to EVERY transformer
-    layer, which is sharded across the tensor parallel group, thus requiring an
-    extra all-gather (ignored for now) per layer and add communication
-    overhead; requires the lease amount of memory; requires an extra forward
-    pass."""
+    """Full activation recomputation stores the input to EVERY transformer layer, which
+    is sharded across the tensor parallel group, thus requiring an extra all-gather
+    (ignored for now) per layer and add communication overhead; requires the lease
+    amount of memory; requires an extra forward pass."""
 
 
 @total_ordering
@@ -60,16 +59,15 @@ class DSZeRO(Enum):
     """No DeepSPeed ZeRO; requires the most amount of memory."""
 
     STAGE_1 = 1
-    """ZeRO stage 1 shards the optimizer states across the data parallel
-    group."""
+    """ZeRO stage 1 shards the optimizer states across the data parallel group."""
 
     STAGE_2 = 2
-    """ZeRO stage 2 shards the optimizer states and gradients across the data
-    parallel group."""
+    """ZeRO stage 2 shards the optimizer states and gradients across the data parallel
+    group."""
 
     STAGE_3 = 3
-    """ZeRO stage 3 shards the optimizer states, gradients, and model weights
-    across the data parallel group."""
+    """ZeRO stage 3 shards the optimizer states, gradients, and model weights across the
+    data parallel group."""
 
     def __lt__(self, other):
         if self.__class__ is other.__class__:
@@ -79,8 +77,8 @@ class DSZeRO(Enum):
 
 class LLMAnalysis:
     """Given the specified model, GPU, data type, parallelism
-    configuration/implementation, LLMAnalysis estimates the latency and memory
-    usage of LLMs for training or inference.
+    configuration/implementation, LLMAnalysis estimates the latency and memory usage of
+    LLMs for training or inference.
 
     Refer to the `train` and `infer` entry functions for usage details.
     """
@@ -215,8 +213,8 @@ class LLMAnalysis:
                 self.inter_node_memory_efficiency)
 
     def get_TFLOPS_per_gpu(self) -> float:
-        """Get the expected TFLOPS per GPU for the specified data type
-        configuration/GPU (adjusted by flops_efficiency)
+        """Get the expected TFLOPS per GPU for the specified data type configuration/GPU
+        (adjusted by flops_efficiency)
 
         Returns:
             float: TFLOPS per GPU
@@ -265,8 +263,8 @@ class LLMAnalysis:
         return num_params_input_embedding + num_params_output_embedding
 
     def get_num_params_per_layer_attn(self) -> int:
-        """Get the number of parameters in the attention linear layers,
-        including the query/key/value projection and output matrices.
+        """Get the number of parameters in the attention linear layers, including the
+        query/key/value projection and output matrices.
 
         Returns:
             int: the number of parameters in the attention linear layers
@@ -300,8 +298,8 @@ class LLMAnalysis:
         return 2 * self.model_config.hidden_dim
 
     def get_num_params_per_layer(self) -> int:
-        """Get the number of parameters in a transformer layer, including the
-        attention and MLP linear layers.
+        """Get the number of parameters in a transformer layer, including the attention
+        and MLP linear layers.
 
         Returns:
             int: the number of parameters in a transformer layer
@@ -355,11 +353,10 @@ class LLMAnalysis:
             self,
             ds_zero: DSZeRO = DSZeRO.NONE,
             return_breakdown: bool = False) -> Union[float, tuple]:
-        """Get the memory (in bytes) required to store the weights of a
-        transformer layer, given the number of parameters in a transformer
-        layer, the data type used for the weights, the tensor parallelism size,
-        and the DeepSpeed ZeRO stage. WIth ZeRO Stage 3, the weights are
-        sharded across data parallel groups.
+        """Get the memory (in bytes) required to store the weights of a transformer
+        layer, given the number of parameters in a transformer layer, the data type used
+        for the weights, the tensor parallelism size, and the DeepSpeed ZeRO stage. WIth
+        ZeRO Stage 3, the weights are sharded across data parallel groups.
 
         Args:
             ds_zero (DSZeRO, optional): which DeepSpeed ZeRO stage to use. Defaults to DSZeRO.NONE (disabled).
@@ -401,10 +398,10 @@ class LLMAnalysis:
         other_op_bytes: int = None,
         ds_zero: DSZeRO = DSZeRO.NONE,
     ) -> float:
-        """Get the memory (in bytes) required to store the gradients and optimizer states of
-        a transformer layer.
-        The optimizer states include the master weights and other states such as momentum.
-        The gradients need to be upcasted to the same data type as the optimizer master weights before being applied.
+        """Get the memory (in bytes) required to store the gradients and optimizer
+        states of a transformer layer. The optimizer states include the master weights
+        and other states such as momentum. The gradients need to be upcasted to the same
+        data type as the optimizer master weights before being applied.
 
         The default assumes using Adam optimizer (https://arxiv.org/abs/1412.6980), which requires the full-precision master weights (`master_weights_dtype_bytes=4`), momentum and variance (`other_op_bytes=8`).
         For other optimizers, use `master_weights_dtype_bytes` and `other_op_bytes` to express the bytes needed. For example, with lion optimizer (https://arxiv.org/abs/2302.06675), `other_op_bytes = 4` as it only requires FP32 momentum.
@@ -439,11 +436,10 @@ class LLMAnalysis:
         return memory_optimizer_state_per_layer, memory_gradient_per_layer
 
     def get_memory_embedding(self, dtype_bytes: int = BYTES_FP32) -> float:
-        """Get the memory (in bytes) required to store the embedding layer,
-        given the number of parameters in the embedding layer, the data type
-        (defaults to FP32) used for the weights, and the tensor parallelism
-        size (Megatron-LM partitions the embedding layer across the tensor
-        parallel groups).
+        """Get the memory (in bytes) required to store the embedding layer, given the
+        number of parameters in the embedding layer, the data type (defaults to FP32)
+        used for the weights, and the tensor parallelism size (Megatron-LM partitions
+        the embedding layer across the tensor parallel groups).
 
         Args:
             dtype_bytes (int, optional): the number of bytes in the data type for embedding weight. Defaults to BYTES_FP32.
@@ -725,9 +721,9 @@ class LLMAnalysis:
         seq_len: int,
         kv_cache_dtype_bytes: int = None,
     ) -> float:
-        """Get the memory (in bytes) required to store the key and value cache
-        for a transformer layer in inference, given the batch size, sequence
-        length, activation data type, and tensor parallelism size.
+        """Get the memory (in bytes) required to store the key and value cache for a
+        transformer layer in inference, given the batch size, sequence length,
+        activation data type, and tensor parallelism size.
 
         Args:
             batch_size (int): batch size
@@ -756,10 +752,10 @@ class LLMAnalysis:
 
     def get_num_flops_fwd_per_layer_attn(self, batch_size: int,
                                          seq_len: int) -> int:
-        """Get the number of floating point operations (flops) for the forward
-        pass of the attention module in a transformer layer, given the batch
-        size and sequence length. The count is model-specific and does not
-        depend on the parallelism strategy.
+        """Get the number of floating point operations (flops) for the forward pass of
+        the attention module in a transformer layer, given the batch size and sequence
+        length. The count is model-specific and does not depend on the parallelism
+        strategy.
 
         Args:
             batch_size (int): batch size
@@ -776,10 +772,9 @@ class LLMAnalysis:
 
     def get_num_flops_fwd_per_layer_mlp(self, batch_size: int,
                                         seq_len: int) -> int:
-        """Get the number of floating point operations (flops) for the forward
-        pass of the MLP module in a transformer layer, given the batch size and
-        sequence length. The count is model-specific and does not depend on the
-        parallelism strategy.s.
+        """Get the number of floating point operations (flops) for the forward pass of
+        the MLP module in a transformer layer, given the batch size and sequence length.
+        The count is model-specific and does not depend on the parallelism strategy.s.
 
         Args:
             batch_size (int): batch size
@@ -795,10 +790,9 @@ class LLMAnalysis:
         batch_size: int,
         seq_len: int,
     ) -> int:
-        """Get the number of floating point operations (flops) for the forward
-        pass of a transformer layer, given the batch size and sequence length.
-        The count is model-specific and does not depend on the parallelism
-        strategy.
+        """Get the number of floating point operations (flops) for the forward pass of a
+        transformer layer, given the batch size and sequence length. The count is model-
+        specific and does not depend on the parallelism strategy.
 
         Args:
             batch_size (int): batch size
@@ -812,10 +806,9 @@ class LLMAnalysis:
                 batch_size, seq_len)
 
     def get_num_flops_fwd_total(self, batch_size: int, seq_len: int) -> int:
-        """Get the number of floating point operations (flops) for the forward
-        pass of the entire transformer, given the batch size and sequence
-        length. The count is model-specific and does not depend on the
-        parallelism strategy.
+        """Get the number of floating point operations (flops) for the forward pass of
+        the entire transformer, given the batch size and sequence length. The count is
+        model-specific and does not depend on the parallelism strategy.
 
         Args:
             batch_size (int): batch size
@@ -848,10 +841,10 @@ class LLMAnalysis:
         return num_flops_fwd_total
 
     def get_num_flops_bwd_total(self, batch_size: int, seq_len: int) -> int:
-        """Get the number of floating point operations (flops) for the backward
-        pass of the entire transformer, estimated as the twice the number of
-        flops for the forward pass. The count is model-specific and does not
-        depend on the parallelism strategy.
+        """Get the number of floating point operations (flops) for the backward pass of
+        the entire transformer, estimated as the twice the number of flops for the
+        forward pass. The count is model-specific and does not depend on the parallelism
+        strategy.
 
         Args:
             batch_size (int): batch size
@@ -864,9 +857,9 @@ class LLMAnalysis:
 
     def get_num_flops_total_selective_recompute_attn(self, batch_size: int,
                                                      seq_len: int) -> int:
-        """Get the number of floating point operations (flops) for
-        recomputation when using selective activation recomputation. The count
-        is model-specific and does not depend on the parallelism strategy.
+        """Get the number of floating point operations (flops) for recomputation when
+        using selective activation recomputation. The count is model-specific and does
+        not depend on the parallelism strategy.
 
         Args:
             batch_size (int): batch size
@@ -886,10 +879,10 @@ class LLMAnalysis:
         activation_recomputation:
         ActivationRecomputation = ActivationRecomputation.NONE,
     ) -> float:
-        """Get the latency for the forward pass of the attention module in a
-        transformer layer, given the batch size and sequence length. The
-        latency is the max of the compute latency and the memory latency,
-        assuming the compute and memory operations are perfectly overlapped.
+        """Get the latency for the forward pass of the attention module in a transformer
+        layer, given the batch size and sequence length. The latency is the max of the
+        compute latency and the memory latency, assuming the compute and memory
+        operations are perfectly overlapped.
 
         Args:
             batch_size (int): batch size
@@ -937,10 +930,10 @@ class LLMAnalysis:
         activation_recomputation:
         ActivationRecomputation = ActivationRecomputation.NONE,
     ) -> float:
-        """Get the latency for the forward pass of the MLP module in a
-        transformer layer, given the batch size and sequence length. The
-        latency is the max of the compute latency and the memory latency,
-        assuming the compute and memory operations are perfectly overlapped.
+        """Get the latency for the forward pass of the MLP module in a transformer
+        layer, given the batch size and sequence length. The latency is the max of the
+        compute latency and the memory latency, assuming the compute and memory
+        operations are perfectly overlapped.
 
         Args:
             batch_size (int): batch size
@@ -988,10 +981,10 @@ class LLMAnalysis:
         ActivationRecomputation = ActivationRecomputation.NONE,
         dtype_bytes: int = BYTES_FP32,
     ) -> float:
-        """Get the latency for the forward pass of a single layernorm in a
-        transformer layer, given the batch size, sequence length, activation
-        recomputation strategy, and data type. The latency is the memory latency
-        as layernorm is a memory-bound operation.
+        """Get the latency for the forward pass of a single layernorm in a transformer
+        layer, given the batch size, sequence length, activation recomputation strategy,
+        and data type. The latency is the memory latency as layernorm is a memory-bound
+        operation.
 
         Args:
             batch_size (int): batch size
@@ -1012,12 +1005,12 @@ class LLMAnalysis:
 
     def get_latency_fwd_per_layer_tp_comm(self, batch_size: int, seq_len: int,
                                           dtype_bytes: int) -> float:
-        """Get the latency of a single allreduce communication across the
-        tensor parallel group in the forward pass of a transformer layer, given
-        the batch size, sequence length, and data type, and assuming  a ring
-        allreduce implementation. The latency is the max of the latency for the
-        allreduce and the minimum message latency through intra-node connect
-        (Note that tensor parallelism size <= number of GPUs per node).
+        """Get the latency of a single allreduce communication across the tensor
+        parallel group in the forward pass of a transformer layer, given the batch size,
+        sequence length, and data type, and assuming  a ring allreduce implementation.
+        The latency is the max of the latency for the allreduce and the minimum message
+        latency through intra-node connect (Note that tensor parallelism size <= number
+        of GPUs per node).
 
         Args:
             batch_size (int): batch size
@@ -1052,12 +1045,11 @@ class LLMAnalysis:
         ActivationRecomputation = ActivationRecomputation.NONE,
         layernorm_dtype_bytes: int = BYTES_FP32,
     ) -> tuple:
-        """Get the latency for the forward pass of a transformer layer, given
-        the batch size, sequence length, training or inference, activation
-        recomputation strategy, and layernorm data type. The latency is the sum
-        of the latency for the attention module, MLP module, two layernorms,
-        and two (Megatron-LM tp implementation) allreduce communications across
-        the tensor parallel group.
+        """Get the latency for the forward pass of a transformer layer, given the batch
+        size, sequence length, training or inference, activation recomputation strategy,
+        and layernorm data type. The latency is the sum of the latency for the attention
+        module, MLP module, two layernorms, and two (Megatron-LM tp implementation)
+        allreduce communications across the tensor parallel group.
 
         Args:
             batch_size (int): batch size
@@ -1120,9 +1112,8 @@ class LLMAnalysis:
             batch_size: int,
             seq_len: int,
             dtype_bytes: int = BYTES_FP32) -> float:
-        """Get the latency for the forward pass of the input embedding layer,
-        given the batch size, sequence length, and data type of the embedding
-        weight.
+        """Get the latency for the forward pass of the input embedding layer, given the
+        batch size, sequence length, and data type of the embedding weight.
 
         Args:
             batch_size (int): batch size
@@ -1167,10 +1158,10 @@ class LLMAnalysis:
         layernorm_dtype_bytes: int = BYTES_FP32,
         breakdown_prefix: str = "",
     ) -> tuple:
-        """Get the latency for the forward pass of the transformer, given the
-        batch size, sequence length, and whether it is inference or not, the
-        activation recomputation strategy, and the number of bytes in the data
-        type for the layernorm activations.
+        """Get the latency for the forward pass of the transformer, given the batch
+        size, sequence length, and whether it is inference or not, the activation
+        recomputation strategy, and the number of bytes in the data type for the
+        layernorm activations.
 
         Args:
             batch_size (int): batch size
@@ -1612,7 +1603,10 @@ class LLMAnalysis:
         gradient_accumulation_steps: int = None,
         global_batch_size: int = None,
     ) -> tuple:
-        """Configure batch_size_per_gpu, gradient_accumulation_steps and global_batch_size (effective batch size). If any is not given (None), find a maximum batch_size_per_gpu while satisfying the constraint `global_batch_size == batch_size_per_gpu * gradient_accumulation_steps * dp_size`.
+        """Configure batch_size_per_gpu, gradient_accumulation_steps and
+        global_batch_size (effective batch size). If any is not given (None), find a
+        maximum batch_size_per_gpu while satisfying the constraint `global_batch_size ==
+        batch_size_per_gpu * gradient_accumulation_steps * dp_size`.
 
         Args:
             max_batch_size_per_gpu (int): the max batch size per gpu before OOM
@@ -2188,9 +2182,9 @@ def train(
     output_dir: str = None,
     output_file_suffix: str = "",
 ) -> dict:
-    """Entry point function of training analysis for the command line
-    interface. This uses pre-defined name-to-configuration mapping and common
-    arguments to construct LLMAnalysis.
+    """Entry point function of training analysis for the command line interface. This
+    uses pre-defined name-to-configuration mapping and common arguments to construct
+    LLMAnalysis.
 
     Args:
         model_name (str, optional): model name to query the pre-defined `model_configs` dict, if not found, query Hugging Face to construct ModelConfig. Defaults to "facebook_opt-1.3b".
