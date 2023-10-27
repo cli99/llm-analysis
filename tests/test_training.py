@@ -43,9 +43,9 @@ def test_training_megatron_lm_1():
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
-    parallel_config = ParallelismConfig(
-        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size
-    )
+    parallel_config = ParallelismConfig(tp_size=tp_size,
+                                        pp_size=pp_size,
+                                        dp_size=dp_size)
 
     analysis = LLMAnalysis(
         model_config,
@@ -61,16 +61,13 @@ def test_training_megatron_lm_1():
         activation_recomputation=activation_recomputation,
     )
 
-    assert within_range(
-        summary_dict["total_training_latency"] / 3600 / 24, 84, TOLERANCE
-    )
+    assert within_range(summary_dict["total_training_latency"] / 3600 / 24, 84,
+                        TOLERANCE)
 
-    assert (
-        _latency_to_string(summary_dict["total_training_latency"])
-        == "84.82 days"
-    )
+    assert (_latency_to_string(
+        summary_dict["total_training_latency"]) == "84.82 days")
 
-    assert _num_to_string(summary_dict["num_params_total"]) == "174.57 G"
+    assert _num_to_string(summary_dict["num_params_total"]) == "162.58 G"
 
 
 # megatron-lm paper https://arxiv.org/abs/2104.04473 Table 2
@@ -92,9 +89,9 @@ def test_training_megatron_lm_2():
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
-    parallel_config = ParallelismConfig(
-        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size
-    )
+    parallel_config = ParallelismConfig(tp_size=tp_size,
+                                        pp_size=pp_size,
+                                        dp_size=dp_size)
 
     analysis = LLMAnalysis(
         model_config,
@@ -110,9 +107,8 @@ def test_training_megatron_lm_2():
         activation_recomputation=activation_recomputation,
     )
 
-    assert within_range(
-        summary_dict["total_training_latency"] / 3600 / 24, 23, TOLERANCE
-    )
+    assert within_range(summary_dict["total_training_latency"] / 3600 / 24, 23,
+                        TOLERANCE)
 
 
 # megatron-lm paper https://arxiv.org/abs/2104.04473 Table 2
@@ -134,9 +130,9 @@ def test_training_megatron_lm_3():
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
-    parallel_config = ParallelismConfig(
-        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size
-    )
+    parallel_config = ParallelismConfig(tp_size=tp_size,
+                                        pp_size=pp_size,
+                                        dp_size=dp_size)
 
     analysis = LLMAnalysis(
         model_config,
@@ -150,13 +146,11 @@ def test_training_megatron_lm_3():
         batch_size_per_gpu=batch_size_per_gpu,
         total_num_tokens=total_num_tokens,
         activation_recomputation=ActivationRecomputation(
-            activation_recomputation
-        ),
+            activation_recomputation),
     )
 
-    assert within_range(
-        summary_dict["total_training_latency"] / 3600 / 24, 156, TOLERANCE
-    )
+    assert within_range(summary_dict["total_training_latency"] / 3600 / 24,
+                        156, TOLERANCE)
 
 
 # megatron-lm paper https://arxiv.org/abs/2104.04473 Table 2
@@ -179,9 +173,9 @@ def test_training_zero3_1():
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
-    parallel_config = ParallelismConfig(
-        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size
-    )
+    parallel_config = ParallelismConfig(tp_size=tp_size,
+                                        pp_size=pp_size,
+                                        dp_size=dp_size)
 
     analysis = LLMAnalysis(
         model_config,
@@ -198,9 +192,8 @@ def test_training_zero3_1():
         ds_zero=DSZeRO.STAGE_3,
     )
 
-    assert within_range(
-        summary_dict["total_training_latency"] / 3600 / 24, 90, TOLERANCE
-    )
+    assert within_range(summary_dict["total_training_latency"] / 3600 / 24, 90,
+                        TOLERANCE)
 
 
 # megatron-lm paper https://arxiv.org/abs/2104.04473 Table 2
@@ -222,9 +215,9 @@ def test_training_zero3_2():
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
-    parallel_config = ParallelismConfig(
-        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size
-    )
+    parallel_config = ParallelismConfig(tp_size=tp_size,
+                                        pp_size=pp_size,
+                                        dp_size=dp_size)
 
     analysis = LLMAnalysis(
         model_config,
@@ -241,9 +234,8 @@ def test_training_zero3_2():
         ds_zero=DSZeRO.STAGE_3,
     )
 
-    assert within_range(
-        summary_dict["total_training_latency"] / 3600 / 24, 136, TOLERANCE
-    )
+    assert within_range(summary_dict["total_training_latency"] / 3600 / 24,
+                        136, TOLERANCE)
 
 
 # deepspeed megatron mt-nlg-530b paper https://arxiv.org/abs/2201.11990
@@ -265,9 +257,9 @@ def test_training_mt_nlg_1():
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
-    parallel_config = ParallelismConfig(
-        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size
-    )
+    parallel_config = ParallelismConfig(tp_size=tp_size,
+                                        pp_size=pp_size,
+                                        dp_size=dp_size)
 
     analysis = LLMAnalysis(
         model_config,
@@ -306,9 +298,9 @@ def test_training_mt_nlg_2():
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
-    parallel_config = ParallelismConfig(
-        tp_size=tp_size, pp_size=pp_size, dp_size=dp_size
-    )
+    parallel_config = ParallelismConfig(tp_size=tp_size,
+                                        pp_size=pp_size,
+                                        dp_size=dp_size)
 
     analysis = LLMAnalysis(
         model_config,

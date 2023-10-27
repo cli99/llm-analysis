@@ -50,9 +50,9 @@ def test_fastertransformer_13b_tp1():
         num_tokens_to_generate=10,
     )
 
-    assert within_range(
-        summary_dict["decode_latency"] * 1000, 17.07, TOLERANCE
-    )
+    assert within_range(summary_dict["decode_latency"] * 1000, 17.07,
+                        TOLERANCE)
+
 
 def test_llama2_70b():
     model_name = "upstage/Llama-2-70b-instruct-v2"
@@ -79,6 +79,4 @@ def test_llama2_70b():
         num_tokens_to_generate=512,
     )
 
-    assert within_range(
-        summary_dict["total_decode_latency"], 14.79, TOLERANCE
-    )
+    assert within_range(summary_dict["total_decode_latency"], 14.79, TOLERANCE)

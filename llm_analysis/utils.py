@@ -13,17 +13,17 @@
 # limitations under the License.
 
 
-def _num_to_string(num, precision=2):
+def _num_to_string(num, precision=2, divisor=1024):
     if num is None:
         return "None"
-    if num // 10**12 > 0:
-        return str(round(num / 10.0**12, precision)) + " T"
-    elif num // 10**9 > 0:
-        return str(round(num / 10.0**9, precision)) + " G"
-    elif num // 10**6 > 0:
-        return str(round(num / 10.0**6, precision)) + " M"
-    elif num // 10**3 > 0:
-        return str(round(num / 10.0**3, precision)) + " K"
+    if num // divisor**4 > 0:
+        return str(round(num / divisor**4, precision)) + " T"
+    elif num // divisor**3 > 0:
+        return str(round(num / divisor**3, precision)) + " G"
+    elif num // divisor**2 > 0:
+        return str(round(num / divisor**2, precision)) + " M"
+    elif num // divisor > 0:
+        return str(round(num / divisor, precision)) + " K"
     else:
         return str(num)
 

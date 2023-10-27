@@ -15,16 +15,18 @@ repos:
       - id: check-xml
       - id: check-added-large-files
         args: [— maxkb=100]
+      - id: fix-encoding-pragma
+        args: [--remove]
   - repo: https://github.com/pycqa/flake8
     rev: 4.0.1
     hooks:
       - id: flake8
-        args:
-          [
-            "--ignore=E,F403,F405,F541,F841,W",
-            "--select=E9,F,W6",
-            "--per-file-ignores=__init__.py:F401",
-          ]
+        args: ["--config=.flake8"]
+  - repo: https://github.com/google/yapf
+    rev: v0.32.0
+    hooks:
+      - id: yapf
+        additional_dependencies: [toml]
   - repo: https://github.com/codespell-project/codespell
     rev: v2.1.0
     hooks:

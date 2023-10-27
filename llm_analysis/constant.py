@@ -16,11 +16,13 @@ BITS_PER_BYTE = 8  # number of bits in a byte
 
 BITS_FP32 = 32  # number of bits in FP32 data type
 BITS_FP16 = 16  # number of bits in FP16 data type
+BITS_BP16 = 16  # number of bits in BP16 data type
 BITS_INT8 = 8  # number of bits in INT8 data type
 BITS_INT4 = 4  # number of bits in INT4 data type
 
 BYTES_FP32 = BITS_FP32 // BITS_PER_BYTE  # number of bytes in FP32 data type
 BYTES_FP16 = BITS_FP16 // BITS_PER_BYTE  # number of bytes in FP16 data type
+BYTES_BP16 = BITS_BP16 // BITS_PER_BYTE  # number of bytes in BP16 data type
 BYTES_INT8 = BITS_INT8 // BITS_PER_BYTE  # number of bytes in INT8 data type
 BYTES_INT4 = BITS_INT4 // BITS_PER_BYTE  # number of bytes in INT4 data type
 
