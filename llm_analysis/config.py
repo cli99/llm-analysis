@@ -68,6 +68,7 @@ class ModelConfig:
     def __post_init__(self):
         if self.ffn_embed_dim is None and self.expansion_ratio is None:
             self.ffn_embed_dim = self.hidden_dim * 4
+            self.expansion_ratio = 4
         elif self.ffn_embed_dim is None:
             self.ffn_embed_dim = self.hidden_dim * self.expansion_ratio
         elif self.expansion_ratio is None:

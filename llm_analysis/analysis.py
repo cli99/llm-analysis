@@ -18,6 +18,7 @@ import os
 from enum import Enum
 from functools import total_ordering
 from pprint import pformat
+from typing import Optional,Union,List
 
 import fire
 
@@ -275,6 +276,7 @@ class LLMAnalysis:
             self.parallelism_config.tp_size,
             1)  # At least on attention head on each tensor-parallel GPU
         num_key_value_heads = num_heads_per_gpu * self.parallelism_config.tp_size
+
         return 2 * self.model_config.hidden_dim**2 + 2 * self.model_config.hidden_dim * (
             self.model_config.hidden_dim * num_key_value_heads /
             self.model_config.n_head)
@@ -351,7 +353,7 @@ class LLMAnalysis:
 
     def get_memory_weight_per_layer(self,
                                     ds_zero: DSZeRO = DSZeRO.NONE,
-                                    return_breakdown: bool = False) -> float:
+                                    return_breakdown: bool = False) -> Union[float, tuple]:
         """Get the memory (in bytes) required to store the weights of a
         transformer layer, given the number of parameters in a transformer
         layer, the data type used for the weights, the tensor parallelism size,
@@ -362,7 +364,7 @@ class LLMAnalysis:
             ds_zero (DSZeRO, optional): which DeepSpeed ZeRO stage to use. Defaults to DSZeRO.NONE (disabled).
 
         Returns:
-            float or tuple: the memory (in bytes) required to store the weights of a transformer layer, or its breakdown
+            Union[float, tuple]: the memory (in bytes) required to store the weights of a transformer layer, or a tuple of its breakdown
         """
         if ds_zero == DSZeRO.STAGE_3:
             sharded_dp_size = self.parallelism_config.dp_size
@@ -370,7 +372,6 @@ class LLMAnalysis:
         else:
             sharded_dp_size = 1
             mlp_sharded_dp_size = 1
-
         memory_weight_attn_per_layer = self.get_num_params_per_layer_attn(
         ) * self.dtype_config.weight_bits / BITS_PER_BYTE / self.parallelism_config.tp_size / sharded_dp_size
 
@@ -457,6 +458,8 @@ class LLMAnalysis:
         batch_size: int,
         seq_len: int,
         is_inference: bool = True,
+        flash_attn: bool = True,
+        softmax_dropout: bool = False,
         activation_recomputation:
         ActivationRecomputation = ActivationRecomputation.NONE,
     ) -> float:
@@ -474,6 +477,8 @@ class LLMAnalysis:
             batch_size (int): micro batch size
             seq_len (int): sequence length
             is_inference (bool, optional): whether it is inference or not. Defaults to True.
+            flash_attn (bool, optional): whether to use Flash Attention. Defaults to True.
+            softmax_dropout (bool, optional): whether to apply dropout after softmax. Defaults to False.
             activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
 
         Returns:
@@ -494,21 +499,20 @@ class LLMAnalysis:
             return (seq_len * batch_size * hidden_dim * bytes_per_activation /
                     tp_size)
 
-        # dropout mask only requires a single byte per element
-        drop_out_masks = ((seq_len * batch_size * hidden_dim +
-                           n_head * seq_len**2 * batch_size) / sp_size if
-                          (activation_recomputation !=
-                           activation_recomputation.SELECTIVE) else 0)
-
-        selective_compute_elems = (0 if activation_recomputation.SELECTIVE else
-                                   (2 * n_head * seq_len**2 * batch_size /
-                                    tp_size))
+        attn_compute = 0
+        if activation_recomputation != activation_recomputation.SELECTIVE:
+            if flash_attn:
+                memory_attn_compute = (2 * seq_len * batch_size * hidden_dim + n_head * seq_len * batch_size) * bytes_per_activation / tp_size
+            else:
+                memory_attn_compute = 2 * n_head * seq_len**2 * batch_size * bytes_per_activation / tp_size
+            if softmax_dropout:
+                # dropout mask only requires a single byte per element
+                memory_attn_compute += n_head * seq_len**2 * batch_size / tp_size
 
         memory_activation_per_layer_attn = (
-            (1 * seq_len * batch_size * hidden_dim / sp_size) +
-            (2 * self.model_config.num_key_value_heads / self.model_config.
-             n_head) * seq_len * batch_size * hidden_dim / tp_size +
-            selective_compute_elems) * bytes_per_activation + drop_out_masks
+            1 * seq_len * batch_size * hidden_dim / sp_size +
+            4 * seq_len * batch_size * hidden_dim / tp_size
+            ) * bytes_per_activation + memory_attn_compute
 
         return memory_activation_per_layer_attn
 
@@ -619,11 +623,13 @@ class LLMAnalysis:
         activation_recomputation:
         ActivationRecomputation = ActivationRecomputation.NONE,
         layernorm_dtype_bytes: int = BYTES_FP32,
+        flash_attn: bool = True,
+        softmax_dropout: bool = False,
         mlp_activation_quant_bits: int = None,
         mlp_recompute_gelu: bool = False,
         mlp_gated_linear_units: bool = False,
         return_breakdown: bool = False,
-    ) -> float:
+    ) -> Union[float, tuple]:
         """Get the memory (in bytes) required to store the activations of a
         transformer layer, given the batch size, sequence length, and whether
         it is inference or training, the activation recomputation strategy, and
@@ -638,11 +644,13 @@ class LLMAnalysis:
                 activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for \
                 the layernorm activations. Defaults to BYTES_FP32. Often has to be FP32 in training to maintain model accuracy.
+            flash_attn (bool, optional): whether to use Flash Attention. Defaults to True.
+            softmax_dropout (bool, optional): whether to apply dropout after softmax. Defaults to False.
             mlp_activation_quant_bits (int, optional): number of bits for the quantized MLP activation. Defaults to None.
             mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
             mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
         Returns:
-            float: the memory (in bytes) required to store the activations of a transformer layer
+            Union[float, tuple]: the memory (in bytes) required to store the activations of a transformer layer or a tuple of its breakdown
         """
         if (not is_inference
             ) and activation_recomputation == ActivationRecomputation.FULL:
@@ -658,7 +666,7 @@ class LLMAnalysis:
 
         memory_activation_per_layer_attn = (
             self.get_memory_activation_per_layer_attn(
-                batch_size, seq_len, is_inference, activation_recomputation))
+                batch_size, seq_len, is_inference, flash_attn=flash_attn, softmax_dropout=softmax_dropout, activation_recomputation=activation_recomputation))
 
         memory_activation_per_layer_mlp = (
             self.get_memory_activation_per_layer_mlp(
@@ -1686,6 +1694,8 @@ class LLMAnalysis:
         layernorm_dtype_bytes: int = BYTES_FP32,
         master_weights_dtype_bytes: int = BYTES_FP32,
         other_op_bytes: int = None,
+        flash_attn: bool = True,
+        softmax_dropout: bool = False,
         mlp_activation_quant_bits: int = None,
         mlp_recompute_gelu: bool = False,
         mlp_gated_linear_units: bool = False,
@@ -1705,6 +1715,8 @@ class LLMAnalysis:
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Defaults to BYTES_FP32. Often has to be FP32 in training to maintain model accuracy.
             master_weights_dtype_bytes (int): the number of bytes in the data type for the optimizer master weights. Defaults to BYTES_FP32.
             other_op_bytes (int, optional): the number of bytes in the optimizer state. Defaults to None, which assumes using Adam optimizer.
+            flash_attn (bool, optional): whether to use Flash Attention. Defaults to True.
+            softmax_dropout (bool, optional): whether to apply dropout after softmax. Defaults to False.
             mlp_activation_quant_bits (int, optional): number of bits for quantizing the MLP activation. Defaults to None. Often has to be at least 8 in training to maintain model accuracy.
             mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
             mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
@@ -1787,6 +1799,8 @@ class LLMAnalysis:
                 is_inference=False,
                 activation_recomputation=activation_recomputation,
                 layernorm_dtype_bytes=layernorm_dtype_bytes,
+                flash_attn=flash_attn,
+                softmax_dropout=softmax_dropout,
                 mlp_activation_quant_bits=mlp_activation_quant_bits,
                 mlp_recompute_gelu=mlp_recompute_gelu,
                 mlp_gated_linear_units=mlp_gated_linear_units,
@@ -1822,6 +1836,8 @@ class LLMAnalysis:
                     is_inference=False,
                     activation_recomputation=activation_recomputation,
                     layernorm_dtype_bytes=layernorm_dtype_bytes,
+                    flash_attn=flash_attn,
+                    softmax_dropout=softmax_dropout,
                     mlp_activation_quant_bits=mlp_activation_quant_bits,
                     mlp_recompute_gelu=mlp_recompute_gelu,
                     return_breakdown=True,
@@ -2150,6 +2166,8 @@ def train(
     layernorm_dtype_bytes: int = BYTES_FP32,
     master_weights_dtype_bytes: int = BYTES_FP32,
     other_op_bytes: int = None,
+    flash_attn: bool = True,
+    softmax_dropout: bool = False,
     mlp_activation_quant_bits: int = None,
     mlp_recompute_gelu: bool = False,
     mlp_gated_linear_units: bool = False,
@@ -2187,6 +2205,8 @@ def train(
         layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Often has to be FP32 in training to maintain model accuracy. Defaults to BYTES_FP32.
         master_weights_dtype_bytes (int): the number of bytes in the data type for the optimizer master weights. Defaults to BYTES_FP32.
         other_op_bytes (int, optional): the number of bytes in the optimizer state. Defaults to None, which assumes using Adam optimizer.
+        flash_attn (bool, optional): whether to use Flash Attention. Defaults to True.
+        softmax_dropout (bool, optional): whether to apply dropout after softmax. Defaults to False.
         mlp_activation_quant_bits (int, optional): number of bits for the quantized MLP activation. Defaults to None.
         mlp_recompute_gelu (bool, optional): whether to recompute the GELU activation in the MLP backward pass. Defaults to False.
         mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
@@ -2254,6 +2274,8 @@ def train(
         ds_zero=DSZeRO(ds_zero),
         layernorm_dtype_bytes=layernorm_dtype_bytes,
         master_weights_dtype_bytes=master_weights_dtype_bytes,
+        flash_attn=flash_attn,
+        softmax_dropout=softmax_dropout,
         mlp_activation_quant_bits=mlp_activation_quant_bits,
         mlp_recompute_gelu=mlp_recompute_gelu,
         mlp_gated_linear_units=mlp_gated_linear_units,
