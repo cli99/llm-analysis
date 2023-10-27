@@ -18,7 +18,7 @@ import os
 from enum import Enum
 from functools import total_ordering
 from pprint import pformat
-from typing import Optional,Union,List
+from typing import Optional, Union, List
 
 import fire
 
@@ -109,8 +109,8 @@ class LLMAnalysis:
             achieved_memory_bandwidth_GBs (float, optional): achieved GPU memory bandwidth in GB/s. If specified, will override the hbm_memory_efficiency passed in. Defaults to None.
             flops_efficiency (float, optional): flops efficiency, ranging from 0 to 1. Defaults to None.
             hbm_memory_efficiency (float, optional): GPU HBM memory efficiency, ranging from 0 to 1. Defaults to None.
-            intra_node_memory_efficiency (float, optional):  intra-node memory efficiency, ranging from 0 to 1. Defaults to INTRA_NODE_MEMORY_EFFICIENCY.
-            inter_node_memory_efficiency (float, optional):  inter-node memory efficiency, ranging from 0 to 1. Defaults to INTER_NODE_MEMORY_EFFICIENCY.
+            intra_node_memory_efficiency (float, optional): intra-node memory efficiency, ranging from 0 to 1. Defaults to INTRA_NODE_MEMORY_EFFICIENCY.
+            inter_node_memory_efficiency (float, optional): inter-node memory efficiency, ranging from 0 to 1. Defaults to INTER_NODE_MEMORY_EFFICIENCY.
         """
         self.model_config = model_config
         self.gpu_config = gpu_config
@@ -351,9 +351,10 @@ class LLMAnalysis:
                 self.get_num_params_embedding() +
                 self.get_num_params_per_layer_layernorm())
 
-    def get_memory_weight_per_layer(self,
-                                    ds_zero: DSZeRO = DSZeRO.NONE,
-                                    return_breakdown: bool = False) -> Union[float, tuple]:
+    def get_memory_weight_per_layer(
+            self,
+            ds_zero: DSZeRO = DSZeRO.NONE,
+            return_breakdown: bool = False) -> Union[float, tuple]:
         """Get the memory (in bytes) required to store the weights of a
         transformer layer, given the number of parameters in a transformer
         layer, the data type used for the weights, the tensor parallelism size,
@@ -502,7 +503,9 @@ class LLMAnalysis:
         attn_compute = 0
         if activation_recomputation != activation_recomputation.SELECTIVE:
             if flash_attn:
-                memory_attn_compute = (2 * seq_len * batch_size * hidden_dim + n_head * seq_len * batch_size) * bytes_per_activation / tp_size
+                memory_attn_compute = (2 * seq_len * batch_size * hidden_dim +
+                                       n_head * seq_len * batch_size
+                                       ) * bytes_per_activation / tp_size
             else:
                 memory_attn_compute = 2 * n_head * seq_len**2 * batch_size * bytes_per_activation / tp_size
             if softmax_dropout:
@@ -511,8 +514,8 @@ class LLMAnalysis:
 
         memory_activation_per_layer_attn = (
             1 * seq_len * batch_size * hidden_dim / sp_size +
-            4 * seq_len * batch_size * hidden_dim / tp_size
-            ) * bytes_per_activation + memory_attn_compute
+            4 * seq_len * batch_size * hidden_dim /
+            tp_size) * bytes_per_activation + memory_attn_compute
 
         return memory_activation_per_layer_attn
 
@@ -666,7 +669,12 @@ class LLMAnalysis:
 
         memory_activation_per_layer_attn = (
             self.get_memory_activation_per_layer_attn(
-                batch_size, seq_len, is_inference, flash_attn=flash_attn, softmax_dropout=softmax_dropout, activation_recomputation=activation_recomputation))
+                batch_size,
+                seq_len,
+                is_inference,
+                flash_attn=flash_attn,
+                softmax_dropout=softmax_dropout,
+                activation_recomputation=activation_recomputation))
 
         memory_activation_per_layer_mlp = (
             self.get_memory_activation_per_layer_mlp(
@@ -1409,8 +1417,8 @@ class LLMAnalysis:
         )
 
         if use_kv_cache:
-            if (batch_size_per_gpu *
-                (seq_len + num_tokens_to_generate) < self.get_pivot()):
+            if (batch_size_per_gpu * (seq_len + num_tokens_to_generate)
+                    < self.get_pivot()):
                 logger.warning(
                     "kv_cache is only useful when batch_size *"
                     " (seq+num_tokens_to_generate)"
@@ -1627,16 +1635,16 @@ class LLMAnalysis:
             gradient_accumulation_steps = global_batch_size // (
                 batch_size_per_gpu * dp_size)
             assert (global_batch_size % (batch_size_per_gpu * dp_size) == 0
-                    and gradient_accumulation_steps > 0
-                    ), "no valid gradient_accumulation_steps, {assert_msg}"
+                    and gradient_accumulation_steps
+                    > 0), "no valid gradient_accumulation_steps, {assert_msg}"
         elif global_batch_size and gradient_accumulation_steps:
             # batch_size_per_gpu is None, the other two are not None
             batch_size_per_gpu = global_batch_size // (
                 gradient_accumulation_steps * dp_size)
             assert (global_batch_size %
                     (gradient_accumulation_steps * dp_size) == 0
-                    and batch_size_per_gpu > 0
-                    ), "no valid batch_size_per_gpu, {assert_msg}"
+                    and batch_size_per_gpu
+                    > 0), "no valid batch_size_per_gpu, {assert_msg}"
         elif batch_size_per_gpu and gradient_accumulation_steps:
             # global_batch_size is None, the other two are not None
             global_batch_size = (batch_size_per_gpu *
@@ -1665,9 +1673,9 @@ class LLMAnalysis:
         else:
             # (global_batch_size and gradient_accumulation_steps are None) or (global_batch_size and batch_size_per_gpu are None) or (all are None)
             batch_size_per_gpu = max_batch_size_per_gpu
-            gradient_accumulation_steps = (1 if
-                                           gradient_accumulation_steps is None
-                                           else gradient_accumulation_steps)
+            gradient_accumulation_steps = (1 if gradient_accumulation_steps
+                                           is None else
+                                           gradient_accumulation_steps)
             global_batch_size = (batch_size_per_gpu *
                                  gradient_accumulation_steps *
                                  self.parallelism_config.dp_size)
