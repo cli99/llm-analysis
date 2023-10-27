@@ -397,7 +397,7 @@ class LLMAnalysis:
         master_weights_dtype_bytes: int = BYTES_FP32,
         other_op_bytes: int = None,
         ds_zero: DSZeRO = DSZeRO.NONE,
-    ) -> float:
+    ) -> tuple:
         """Get the memory (in bytes) required to store the gradients and optimizer
         states of a transformer layer. The optimizer states include the master weights
         and other states such as momentum. The gradients need to be upcasted to the same
@@ -416,7 +416,7 @@ class LLMAnalysis:
             ds_zero (DSZeRO, optional): which DeepSpeed ZeRO stage to use. Defaults to DSZeRO.NONE (disabled, no sharding).
 
         Returns:
-            tuple: a tuple of the memory (in bytes) required to store the gradients and optimizer states of a transformer layer
+            tuple: a tuple of the memory (in bytes) required to store the optimizer states and gradients of a transformer layer
         """
         memory_optimizer_state_per_layer = (
             BYTES_FP32 +
@@ -1408,8 +1408,8 @@ class LLMAnalysis:
         )
 
         if use_kv_cache:
-            if (batch_size_per_gpu *
-                (seq_len + num_tokens_to_generate) < self.get_pivot()):
+            if (batch_size_per_gpu * (seq_len + num_tokens_to_generate)
+                    < self.get_pivot()):
                 logger.warning(
                     "kv_cache is only useful when batch_size *"
                     " (seq+num_tokens_to_generate)"
@@ -1629,16 +1629,16 @@ class LLMAnalysis:
             gradient_accumulation_steps = global_batch_size // (
                 batch_size_per_gpu * dp_size)
             assert (global_batch_size % (batch_size_per_gpu * dp_size) == 0
-                    and gradient_accumulation_steps > 0
-                    ), "no valid gradient_accumulation_steps, {assert_msg}"
+                    and gradient_accumulation_steps
+                    > 0), "no valid gradient_accumulation_steps, {assert_msg}"
         elif global_batch_size and gradient_accumulation_steps:
             # batch_size_per_gpu is None, the other two are not None
             batch_size_per_gpu = global_batch_size // (
                 gradient_accumulation_steps * dp_size)
             assert (global_batch_size %
                     (gradient_accumulation_steps * dp_size) == 0
-                    and batch_size_per_gpu > 0
-                    ), "no valid batch_size_per_gpu, {assert_msg}"
+                    and batch_size_per_gpu
+                    > 0), "no valid batch_size_per_gpu, {assert_msg}"
         elif batch_size_per_gpu and gradient_accumulation_steps:
             # global_batch_size is None, the other two are not None
             global_batch_size = (batch_size_per_gpu *
@@ -1667,9 +1667,9 @@ class LLMAnalysis:
         else:
             # (global_batch_size and gradient_accumulation_steps are None) or (global_batch_size and batch_size_per_gpu are None) or (all are None)
             batch_size_per_gpu = max_batch_size_per_gpu
-            gradient_accumulation_steps = (1 if
-                                           gradient_accumulation_steps is None
-                                           else gradient_accumulation_steps)
+            gradient_accumulation_steps = (1 if gradient_accumulation_steps
+                                           is None else
+                                           gradient_accumulation_steps)
             global_batch_size = (batch_size_per_gpu *
                                  gradient_accumulation_steps *
                                  self.parallelism_config.dp_size)
@@ -1765,10 +1765,10 @@ class LLMAnalysis:
         weight_memory_per_gpu = (weight_memory_layers_per_gpu +
                                  weight_memory_embedding_per_gpu)
 
-        optimizer_state_memory_per_gpu, gradient_memory_per_gpu = (
-            self.get_memory_optimizer_state_and_gradient_per_layer(
-                master_weights_dtype_bytes, other_op_bytes, ds_zero) *
-            num_layers_per_gpu)
+        optimizer_state_memory_per_layer, gradient_memory_per_layer = self.get_memory_optimizer_state_and_gradient_per_layer(
+            master_weights_dtype_bytes, other_op_bytes, ds_zero)
+        optimizer_state_memory_per_gpu = optimizer_state_memory_per_layer * num_layers_per_gpu
+        gradient_memory_per_gpu = gradient_memory_per_layer * num_layers_per_gpu
 
         memory_left = (self.gpu_config.mem_per_GPU_in_GB * 1024**3 -
                        weight_memory_per_gpu - optimizer_state_memory_per_gpu -
