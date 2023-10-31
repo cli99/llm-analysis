@@ -10,12 +10,18 @@
 
 - [llm-analysis](#llm-analysis)
   - [Overview](#overview)
-    - [Examples (updating)](#examples-updating)
+    - [Examples](#examples)
   - [Quick Start](#quick-start)
     - [Using the `LLMAnalysis` class](#using-the-llmanalysis-class)
     - [Using the Entry Point Functions for Command Line](#using-the-entry-point-functions-for-command-line)
     - [How to Set FLOPS and Memory Efficiency](#how-to-set-flops-and-memory-efficiency)
-  - [Current Scope (expanding) and Limitations](#current-scope-expanding-and-limitations)
+  - [Current Scope and Limitations](#current-scope-and-limitations)
+    - [Parallelism Scheme](#parallelism-scheme)
+    - [Communication](#communication)
+    - [Activation Recomputation](#activation-recomputation)
+    - [Data Types](#data-types)
+    - [Fine-Tuning](#fine-tuning)
+    - [Assumptions in Inference](#assumptions-in-inference)
   - [TODOs (stay tuned :radio:)](#todos-stay-tuned-radio)
   - [Citation](#citation)
   - [Contributing](#contributing)
@@ -32,7 +38,7 @@ llm-analysis helps answer questions such as:
 - `time` it takes with the given setup to do training or inference and the `cost` (GPU-hours)
 - how the latency/memory changes if using a different model, GPU type, number of GPU, data type for weights and activations, parallelism configuration (suggesting the performance benefit of `modeling change`, `hardware improvement`, `quantization`, `parallelism`, etc.)
 
-### Examples (updating)
+### Examples
 
 Check the example use cases. With llm-analysis, you can do such analysis in minutes :rocket:!
 - [Llama 2 Models](examples/llama2)
@@ -112,38 +118,53 @@ to show the corresponding `GPUConfig`.
 ### How to Set FLOPS and Memory Efficiency
 
 Setting flops and memory efficiency to `1` (default) gives the lower bound of training or inference latency, as it assumes the peak hardware performance (which is never the case).
-A close-to-reality flops or memory efficiency can be found by benchmarking and profiling using the input dimensions in the model (providing such scripts is on the [TODOs](#todos-stay-tuned-radio) list).
+A close-to-reality flops or memory efficiency can be found by benchmarking and profiling using the input dimensions in the model.
 
-If one has to make assumptions, for flops efficiency, literature reports up to `0.5` for large scale model training, and up to `0.7` for inference; `0.9` can be an aggressive target for memory efficiencies.
+If one has to make assumptions, for flops efficiency, literature reports up to `0.5` for large scale model training, and up to `0.7` for inference; `0.9` can be an aggressive target for memory efficiency.
 
-## Current Scope (expanding) and Limitations
+## Current Scope and Limitations
 
-- tp, pp, and sp assume using [`Megatron-LM`](https://github.com/NVIDIA/Megatron-LM) for training and [`FasterTransformer`](https://github.com/NVIDIA/FasterTransformer) for inference, and the dp assumes using [`DeepSpeed ZeRO`](https://github.com/microsoft/DeepSpeed)
-- the parallelism strategy used in llm-analysis follows [Megatron-Turing NLG 530B](https://arxiv.org/abs/2201.11990) where tp is used within a node; then pp is used if the model is still too large to fit in GPU memory; then extra GPUs are used for dp
-- supporting both full and selective activation recomputation, as described in [Reducing Activation Recomputation
-in Large Transformer Models](https://arxiv.org/abs/2205.05198)
-- tp communication is calculated as using `ring allreduce`; pp and dp communications across nodes are ignored for now
-- data types are expressed with the number of bits, only `16`, `8`, and `4` bits data types are modeled for now.
-- pre-training and fine-tuning are modeled the same (controlled by `total_num_tokens` passed to the `train` entry function), thus only full (all model parameters) fine-tuning is supported for now
-- training assumes using the [Adam optimizer](https://arxiv.org/abs/1412.6980)
-- training time only counts forward and backward for now
-- inference assumes perfect overlapping of compute and memory operations
+llm-analysis aims to provide a `lower-bound` estimation of memory usage and latency.
 
-Check the TODOs below for what's next and stay tuned :radio:!
+### Parallelism Scheme
+llm-analysis currently covers Tensor Parallelism (tp), Pipeline Parallelism (pp), Sequence Parallelism (sp), Expert Parallelism (ep), and Data Parallelism (dp).
+
+- tp, pp, and sp adopt the style of parallelization used in [`Megatron-LM`](https://github.com/NVIDIA/Megatron-LM) for training and [`FasterTransformer`](https://github.com/NVIDIA/FasterTransformer) for inference
+- In the training analysis, dp sharding assumes using [`DeepSpeed ZeRO`](https://github.com/microsoft/DeepSpeed) or [`FSDP`](https://pytorch.org/docs/stable/fsdp.html). `ds_zero` is used to specify the dp sharding strategy
+
+  | ds_zero | DeepSpeed ZeRO | FSDP          | Sharding                                            |
+  | ------- | -------------- | ------------- | --------------------------------------------------- |
+  | 0       | disabled       | NO_SHARD      | No sharding                                         |
+  | 1       | Stage 1        | N/A           | Shard optimizer states                              |
+  | 2       | Stage 2        | SHARD_GRAD_OP | Shard gradients and optimizer states                |
+  | 3       | Stage 3        | FULL_SHARD    | Shard gradients, optimizer states, model parameters |
+
+- ep parallelizes the number of MLP experts across `ep_size` devices, i.e. the number of experts per GPU is `total number of experts / ep_size`. Thus for the MLP module, the number of devices for other parallelization dimensions is divided by `ep_size` compared to other parts of the model.
+
+### Communication
+tp communication is calculated as using `ring allreduce`. pp, dp, ep communications are ignored for now, i.e. assuming perfect computation and communication overlapping, which is not true when communication cannot overlap with compute due to dependency, or when communication is too long to hide due to slow interconnect or large data volume.
+
+### Activation Recomputation
+llm-analysis supports both full and selective activation recomputation, as described in [Reducing Activation Recomputation in Large Transformer Models](https://arxiv.org/abs/2205.05198)
+
+### Data Types
+Data types are expressed with the number of bits, only `32` (FP32, TF32), `16` (FP16, BF16), `8` (INT8), and `4` (INT4) bits data types are modeled for now.
+
+### Fine-Tuning
+Fine-tuning is modeled the same (controlled by `total_num_tokens` passed to the `train` entry function) as pre-training, thus assuming full (all model parameters) fine-tuning. Parameter-efficient fine-tuning (PEFT) is
+in future support.
+
+### Assumptions in Inference
+Inference assumes perfect overlapping of compute and memory operations when calculating latency, and maximum memory reuse when calculating memory usage.
 
 ## [TODOs](#todos) (stay tuned :radio:)
+Check the TODOs below for what's next and stay tuned :radio:! Any contributions or feedback are highly welcome!
 
-The following features/improvements are on the roadmap. Stay tuned, and any contributions are welcome! :smile:
-
-- [ ] Add scripts to benchmark and profile the latency, FLOPS and memory efficiency in real workloads
+- [ ] Add dp (across and within a node), ep (within a node), pp (across nodes) communication analysis
 - [ ] Support efficient fine-tuning methods such as [LoRA](https://github.com/microsoft/LoRA) or [Adapters](https://arxiv.org/abs/2303.16199)
-- [ ] Support other optimizers in training analysis
-- [ ] Add configuration/optimization advising
-- [ ] Add pp (across nodes) and dp (across and within a node) communications analysis
-- [ ] Support CPU offloading (weight, kv cache, etc.) analysis in training and inference
-- [ ] Support sparse model inference
-- [ ] Support CPU for inference analysis
-- [ ] ...
+- [ ] Add FP8 datatype support
+- [ ] Support CPU offloading (weight, KV cache, etc.) analysis in training and inference
+- [ ] Support other hardware (e.g. CPU) for inference analysis
 
 ## Citation
 

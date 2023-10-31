@@ -457,6 +457,7 @@ class LLMAnalysis:
         is_inference: bool = True,
         flash_attn: bool = True,
         softmax_dropout: bool = False,
+        attn_dropout: bool = True,
         activation_recomputation:
         ActivationRecomputation = ActivationRecomputation.NONE,
     ) -> float:
@@ -488,19 +489,16 @@ class LLMAnalysis:
         bytes_per_activation = (self.dtype_config.activation_bits /
                                 BITS_PER_BYTE)
 
-        if is_inference:
-            return (4 * seq_len * batch_size * hidden_dim /
-                    sp_size) * bytes_per_activation
-        elif (not is_inference
-              ) and activation_recomputation == ActivationRecomputation.FULL:
+        if (not is_inference
+            ) and activation_recomputation == ActivationRecomputation.FULL:
             return (seq_len * batch_size * hidden_dim * bytes_per_activation /
-                    tp_size)
+                    sp_size)
 
         attn_compute = 0
         if activation_recomputation != activation_recomputation.SELECTIVE:
             if flash_attn:
                 memory_attn_compute = (2 * seq_len * batch_size * hidden_dim +
-                                       n_head * seq_len * batch_size
+                                       4 * n_head * seq_len * batch_size
                                        ) * bytes_per_activation / tp_size
             else:
                 memory_attn_compute = 2 * n_head * seq_len**2 * batch_size * bytes_per_activation / tp_size
@@ -508,10 +506,18 @@ class LLMAnalysis:
                 # dropout mask only requires a single byte per element
                 memory_attn_compute += n_head * seq_len**2 * batch_size / tp_size
 
+        if is_inference:
+            return max(
+                3 * bytes_per_activation * seq_len * batch_size * hidden_dim /
+                sp_size, memory_attn_compute)
+
         memory_activation_per_layer_attn = (
-            1 * seq_len * batch_size * hidden_dim / sp_size +
+            seq_len * batch_size * hidden_dim / sp_size +
             4 * seq_len * batch_size * hidden_dim /
             tp_size) * bytes_per_activation + memory_attn_compute
+
+        if attn_dropout:
+            memory_activation_per_layer_attn += seq_len * batch_size * hidden_dim / sp_size
 
         return memory_activation_per_layer_attn
 
@@ -522,7 +528,10 @@ class LLMAnalysis:
         is_inference: bool = True,
         activation_recomputation:
         ActivationRecomputation = ActivationRecomputation.NONE,
-        activation_quant_bits: int = None,
+        mlp_activation_quant_bits: int = None,
+        mlp_1linear_quant_bits: int = None,
+        mlp_gelu_input_quant_bits: int = None,
+        mlp_2linear_quant_bits: int = None,
         recompute_gelu: bool = False,
         gated_linear_units: bool = False,
         with_dropout: bool = False,
@@ -538,15 +547,21 @@ class LLMAnalysis:
             batch_size (int): micro batch size
             seq_len (int): sequence length
             is_inference (bool, optional): whether it is inference or not. Defaults to True.
-            activation_recomputation (ActivationRecomputation, optional): \
-                activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
-            activation_quant_bits (int, optional): number of bits to quantize activations
-            recompute_gelu (bool, optional): whether to recompute the gelu  in backward pass
-            gated_linear_units (bool, optional): whether to use gated linear units
+            activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
+            mlp_activation_quant_bits (int, optional): number of bits to quantize MLP activations; if set, override the values for mlp_1linear_quant_bits, mlp_gelu_input_quant_bits and mlp_2linear_quant_bits. Defaults to None.
+            mlp_1linear_quant_bits (int, optional): number of bits to quantize the input activations of the first linear layer. Defaults to None.
+            mlp_gelu_input_quant_bits (int, optional): number of bits to quantize the GELU input activations. Defaults to None.
+            mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.
+            recompute_gelu (bool, optional): whether to recompute gelu in backward pass.
+            gated_linear_units (bool, optional): whether to use gated linear units.
 
         Returns:
             float: the memory (in bytes) required to store the activations of the MLP in a transformer layer
         """
+        if (not is_inference
+            ) and activation_recomputation == ActivationRecomputation.FULL:
+            return 0
+
         tp_size = self.parallelism_config.tp_size
         sp_size = self.parallelism_config.sp_size
         ep_size = self.parallelism_config.ep_size
@@ -554,35 +569,45 @@ class LLMAnalysis:
 
         bytes_per_activation = (self.dtype_config.activation_bits /
                                 BITS_PER_BYTE)
-        if activation_quant_bits:
-            bytes_per_activation = activation_quant_bits / BITS_PER_BYTE
+
+        bytes_per_1linear_input = bytes_per_gelu_input = bytes_per_2linear_input = bytes_per_activation
+        if mlp_1linear_quant_bits:
+            bytes_per_1linear_input = mlp_1linear_quant_bits / BITS_PER_BYTE
+        if mlp_gelu_input_quant_bits:
+            bytes_per_gelu_input = mlp_gelu_input_quant_bits / BITS_PER_BYTE
+        if mlp_2linear_quant_bits:
+            bytes_per_2linear_input = mlp_2linear_quant_bits / BITS_PER_BYTE
+        if mlp_activation_quant_bits:
+            bytes_per_1linear_input = mlp_activation_quant_bits / BITS_PER_BYTE
+            bytes_per_gelu_input = mlp_activation_quant_bits / BITS_PER_BYTE
+            bytes_per_2linear_input = mlp_activation_quant_bits / BITS_PER_BYTE
+
+        num_experts_per_gpu = self.model_config.moe_num_experts / ep_size
+        assert self.model_config.moe_top_k <= num_experts_per_gpu, f'moe_top_k: {self.model_config.moe_top_k} must be <= num_experts_per_gpu: {num_experts_per_gpu}'
 
         if is_inference:
-            return (5 * seq_len * batch_size * hidden_dim /
-                    sp_size) * bytes_per_activation
-        elif (not is_inference
-              ) and activation_recomputation == ActivationRecomputation.FULL:
-            return 0
+            return max(
+                bytes_per_1linear_input,
+                bytes_per_gelu_input * self.model_config.expansion_ratio
+            ) * seq_len * batch_size * hidden_dim * self.model_config.moe_top_k / tp_size
+
+        memory_activation_per_layer_mlp = bytes_per_1linear_input * seq_len * batch_size * hidden_dim * self.model_config.moe_top_k / sp_size
+        if recompute_gelu and gated_linear_units:
+            # swiglu decreases the expansion ratio by 2/3 to get isoparam
+            memory_activation_per_layer_mlp += (
+                1 / 3 * bytes_per_gelu_input
+            ) * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / tp_size
+        elif recompute_gelu:
+            memory_activation_per_layer_mlp += bytes_per_gelu_input * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / tp_size
+        else:
+            memory_activation_per_layer_mlp += (
+                bytes_per_gelu_input + bytes_per_2linear_input
+            ) * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / tp_size
 
         # dropout mask only requires a single byte per element
-        drop_out_mask = (seq_len * batch_size * hidden_dim /
-                         sp_size) if with_dropout else 0
-
-        if self.model_config.moe_num_experts == 1:
-            memory_activation_per_layer_mlp = (
-                (1 * seq_len * batch_size * hidden_dim / sp_size) +
-                ((4 / 3 if recompute_gelu and gated_linear_units else
-                  (1 if recompute_gelu else 2)) * seq_len * batch_size *
-                 hidden_dim * self.model_config.expansion_ratio /
-                 tp_size)) * bytes_per_activation + drop_out_mask
-        else:
-            memory_activation_per_layer_mlp = self.model_config.moe_top_k * (
-                (1 * seq_len * batch_size * hidden_dim / sp_size) +
-                ((4 / 3 if recompute_gelu and gated_linear_units else
-                  (1 if recompute_gelu else 2)) * seq_len * batch_size *
-                 hidden_dim * self.model_config.expansion_ratio *
-                 self.model_config.moe_num_experts / ep_size /
-                 tp_size)) * bytes_per_activation + drop_out_mask
+        if with_dropout:
+            drop_out_mask = seq_len * batch_size * hidden_dim / sp_size
+            memory_activation_per_layer_mlp += drop_out_mask
 
         return memory_activation_per_layer_mlp
 
@@ -614,6 +639,11 @@ class LLMAnalysis:
         return (seq_len * batch_size * self.model_config.hidden_dim /
                 self.parallelism_config.sp_size) * dtype_bytes
 
+    def get_memory_activation_embedding_output(self, batch_size: int,
+                                               seq_len: int) -> float:
+        """Get the memory (in bytes) required to store the activations of outpu embedding (logits)"""
+        return 2 * self.model_config.vocab_size * batch_size * seq_len * self.dtype_config.activation_bits / BITS_PER_BYTE / self.parallelism_config.tp_size
+
     def get_memory_activation_per_layer(
         self,
         batch_size: int,
@@ -625,6 +655,9 @@ class LLMAnalysis:
         flash_attn: bool = True,
         softmax_dropout: bool = False,
         mlp_activation_quant_bits: int = None,
+        mlp_1linear_quant_bits: int = None,
+        mlp_gelu_input_quant_bits: int = None,
+        mlp_2linear_quant_bits: int = None,
         mlp_recompute_gelu: bool = False,
         mlp_gated_linear_units: bool = False,
         return_breakdown: bool = False,
@@ -645,8 +678,10 @@ class LLMAnalysis:
                 the layernorm activations. Defaults to BYTES_FP32. Often has to be FP32 in training to maintain model accuracy.
             flash_attn (bool, optional): whether to use Flash Attention. Defaults to True.
             softmax_dropout (bool, optional): whether to apply dropout after softmax. Defaults to False.
-            mlp_activation_quant_bits (int, optional): number of bits for the quantized MLP activation. Defaults to None.
-            mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
+            mlp_activation_quant_bits (int, optional): number of bits to quantize MLP activations; if set, override the values for mlp_1linear_quant_bits, mlp_gelu_input_quant_bits and mlp_2linear_quant_bits. Defaults to None.
+            mlp_1linear_quant_bits (int, optional): number of bits to quantize the input activations of the first linear layer. Defaults to None.
+            mlp_gelu_input_quant_bits (int, optional): number of bits to quantize the GELU input activations. Defaults to None.
+            mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.            mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
             mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
         Returns:
             Union[float, tuple]: the memory (in bytes) required to store the activations of a transformer layer or a tuple of its breakdown
@@ -678,7 +713,10 @@ class LLMAnalysis:
                 seq_len,
                 is_inference,
                 activation_recomputation,
-                activation_quant_bits=mlp_activation_quant_bits,
+                mlp_activation_quant_bits=mlp_activation_quant_bits,
+                mlp_1linear_quant_bits=mlp_1linear_quant_bits,
+                mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
+                mlp_2linear_quant_bits=mlp_2linear_quant_bits,
                 recompute_gelu=mlp_recompute_gelu,
                 gated_linear_units=mlp_gated_linear_units,
             ))
@@ -1408,8 +1446,8 @@ class LLMAnalysis:
         )
 
         if use_kv_cache:
-            if (batch_size_per_gpu * (seq_len + num_tokens_to_generate)
-                    < self.get_pivot()):
+            if (batch_size_per_gpu *
+                (seq_len + num_tokens_to_generate) < self.get_pivot()):
                 logger.warning(
                     "kv_cache is only useful when batch_size *"
                     " (seq+num_tokens_to_generate)"
@@ -1629,16 +1667,16 @@ class LLMAnalysis:
             gradient_accumulation_steps = global_batch_size // (
                 batch_size_per_gpu * dp_size)
             assert (global_batch_size % (batch_size_per_gpu * dp_size) == 0
-                    and gradient_accumulation_steps
-                    > 0), "no valid gradient_accumulation_steps, {assert_msg}"
+                    and gradient_accumulation_steps > 0
+                    ), "no valid gradient_accumulation_steps, {assert_msg}"
         elif global_batch_size and gradient_accumulation_steps:
             # batch_size_per_gpu is None, the other two are not None
             batch_size_per_gpu = global_batch_size // (
                 gradient_accumulation_steps * dp_size)
             assert (global_batch_size %
                     (gradient_accumulation_steps * dp_size) == 0
-                    and batch_size_per_gpu
-                    > 0), "no valid batch_size_per_gpu, {assert_msg}"
+                    and batch_size_per_gpu > 0
+                    ), "no valid batch_size_per_gpu, {assert_msg}"
         elif batch_size_per_gpu and gradient_accumulation_steps:
             # global_batch_size is None, the other two are not None
             global_batch_size = (batch_size_per_gpu *
@@ -1667,9 +1705,9 @@ class LLMAnalysis:
         else:
             # (global_batch_size and gradient_accumulation_steps are None) or (global_batch_size and batch_size_per_gpu are None) or (all are None)
             batch_size_per_gpu = max_batch_size_per_gpu
-            gradient_accumulation_steps = (1 if gradient_accumulation_steps
-                                           is None else
-                                           gradient_accumulation_steps)
+            gradient_accumulation_steps = (1 if
+                                           gradient_accumulation_steps is None
+                                           else gradient_accumulation_steps)
             global_batch_size = (batch_size_per_gpu *
                                  gradient_accumulation_steps *
                                  self.parallelism_config.dp_size)
@@ -1699,6 +1737,9 @@ class LLMAnalysis:
         flash_attn: bool = True,
         softmax_dropout: bool = False,
         mlp_activation_quant_bits: int = None,
+        mlp_1linear_quant_bits: int = None,
+        mlp_gelu_input_quant_bits: int = None,
+        mlp_2linear_quant_bits: int = None,
         mlp_recompute_gelu: bool = False,
         mlp_gated_linear_units: bool = False,
         output_dir: str = None,
@@ -1719,7 +1760,10 @@ class LLMAnalysis:
             other_op_bytes (int, optional): the number of bytes in the optimizer state. Defaults to None, which assumes using Adam optimizer.
             flash_attn (bool, optional): whether to use Flash Attention. Defaults to True.
             softmax_dropout (bool, optional): whether to apply dropout after softmax. Defaults to False.
-            mlp_activation_quant_bits (int, optional): number of bits for quantizing the MLP activation. Defaults to None. Often has to be at least 8 in training to maintain model accuracy.
+            mlp_activation_quant_bits (int, optional): number of bits to quantize MLP activations; if set, override the values for mlp_1linear_quant_bits, mlp_gelu_input_quant_bits and mlp_2linear_quant_bits. Defaults to None.
+            mlp_1linear_quant_bits (int, optional): number of bits to quantize the input activations of the first linear layer. Defaults to None.
+            mlp_gelu_input_quant_bits (int, optional): number of bits to quantize the GELU input activations. Defaults to None.
+            mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.
             mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
             mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
             output_dir (str, optional): if set to a directory path, write the return summary dict out to the directory with the setup. Defaults to None.
@@ -1793,7 +1837,7 @@ class LLMAnalysis:
 
         # With pipeline parallelism, each stage contains L/p layers so the first stage must store p ×L/p = L layers worth of activations regardless of the pipeline parallel size p; activation memory required for the input embeddings, the last layer-norm, and the output layer are ignored here. Refer to https://arxiv.org/abs/2205.05198 for more details.
 
-        activation_memory_batch_size_1, attn_activation_memory_batch_size_1, mlp_activation_memory_batch_size_1, layernorm_activation_memory_batch_size_1 = [
+        activation_memory_batch_size_1, activation_memory_attn_batch_size_1, mlp_activation_memory_batch_size_1, layernorm_activation_memory_batch_size_1 = [
             x * self.model_config.num_layers
             for x in self.get_memory_activation_per_layer(
                 1,
@@ -1804,17 +1848,23 @@ class LLMAnalysis:
                 flash_attn=flash_attn,
                 softmax_dropout=softmax_dropout,
                 mlp_activation_quant_bits=mlp_activation_quant_bits,
+                mlp_1linear_quant_bits=mlp_1linear_quant_bits,
+                mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
+                mlp_2linear_quant_bits=mlp_2linear_quant_bits,
                 mlp_recompute_gelu=mlp_recompute_gelu,
                 mlp_gated_linear_units=mlp_gated_linear_units,
                 return_breakdown=True,
             )
         ]
+        activation_memory_embedding_output_per_gpu = self.get_memory_activation_embedding_output(
+            1, seq_len)
+        activation_memory_batch_size_1 += activation_memory_embedding_output_per_gpu
 
         max_batch_size_per_gpu = int(memory_left //
                                      activation_memory_batch_size_1)
         logger.info(
-            f"activation_memory_batch_size_1: {_num_to_string(activation_memory_batch_size_1)}B,"
-            f" max_batch_size_per_gpu: {max_batch_size_per_gpu}")
+            f"activation_memory_batch_size_1: {_num_to_string(activation_memory_batch_size_1)}B, activation_memory_embedding_output_per_gpu: {_num_to_string(activation_memory_embedding_output_per_gpu)}B, max_batch_size_per_gpu: {max_batch_size_per_gpu}"
+        )
 
         (
             batch_size_per_gpu,
@@ -1828,9 +1878,9 @@ class LLMAnalysis:
         )
 
         if batch_size_per_gpu == 1:
-            activation_memory_per_gpu, attn_activation_memory, mlp_activation_memory, layernorm_activation_memory = activation_memory_batch_size_1, attn_activation_memory_batch_size_1, mlp_activation_memory_batch_size_1, layernorm_activation_memory_batch_size_1
+            activation_memory_per_gpu, activation_memory_attn_per_gpu, activation_memory_mlp_per_gpu, activation_memory_layernorm_per_gpu = activation_memory_batch_size_1, activation_memory_attn_batch_size_1, mlp_activation_memory_batch_size_1, layernorm_activation_memory_batch_size_1
         else:
-            activation_memory_per_gpu, attn_activation_memory, mlp_activation_memory, layernorm_activation_memory = [
+            activation_memory_per_gpu, activation_memory_attn_per_gpu, activation_memory_mlp_per_gpu, activation_memory_layernorm_per_gpu = [
                 x * self.model_config.num_layers
                 for x in self.get_memory_activation_per_layer(
                     batch_size_per_gpu,
@@ -1841,10 +1891,16 @@ class LLMAnalysis:
                     flash_attn=flash_attn,
                     softmax_dropout=softmax_dropout,
                     mlp_activation_quant_bits=mlp_activation_quant_bits,
+                    mlp_1linear_quant_bits=mlp_1linear_quant_bits,
+                    mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
+                    mlp_2linear_quant_bits=mlp_2linear_quant_bits,
                     mlp_recompute_gelu=mlp_recompute_gelu,
                     return_breakdown=True,
                 )
             ]
+            activation_memory_embedding_output_per_gpu = self.get_memory_activation_embedding_output(
+                batch_size_per_gpu, seq_len)
+            activation_memory_per_gpu += activation_memory_embedding_output_per_gpu
 
         logger.info("activation_memory_per_gpu with batch_size_per_gpu"
                     f" {batch_size_per_gpu}:"
@@ -1936,7 +1992,7 @@ class LLMAnalysis:
                  else 6) * self.total_num_params * total_num_tokens /
                 (total_num_gpus * self.get_TFLOPS_per_gpu() * 1e12))
             if not within_range(total_training_latency,
-                                estimated_total_training_latency, 0.2):
+                                estimated_total_training_latency, 0.05):
                 logger.warning(
                     f"total_training_latency ({total_training_latency}) is too"
                     " different from estimated_total_training_latency"
@@ -2016,16 +2072,18 @@ class LLMAnalysis:
             activation_memory_batch_size_1,
             "activation_memory_per_gpu":
             activation_memory_per_gpu,
-            "attn_activation_memory_per_gpu":
-            attn_activation_memory,
-            "mlp_activation_memory_per_gpu":
-            mlp_activation_memory,
-            "layernorm_activation_memory_per_gpu":
-            layernorm_activation_memory,
+            "activation_memory_attn_per_gpu":
+            activation_memory_attn_per_gpu,
+            "activation_memory_mlp_per_gpu":
+            activation_memory_mlp_per_gpu,
+            "activation_memory_layernorm_per_gpu":
+            activation_memory_layernorm_per_gpu,
+            "activation_memory_embedding_output_per_gpu":
+            activation_memory_embedding_output_per_gpu,
             "(weight+op_state+grad+act)_memory_per_gpu":
             weight_memory_per_gpu + gradient_memory_per_gpu +
             optimizer_state_memory_per_gpu + activation_memory_per_gpu,
-            "memory_left":
+            "memory_left_per_gpu":
             memory_left,
             "latency_per_micro_batch":
             latency_per_micro_batch,
@@ -2171,6 +2229,9 @@ def train(
     flash_attn: bool = True,
     softmax_dropout: bool = False,
     mlp_activation_quant_bits: int = None,
+    mlp_1linear_quant_bits: int = None,
+    mlp_gelu_input_quant_bits: int = None,
+    mlp_2linear_quant_bits: int = None,
     mlp_recompute_gelu: bool = False,
     mlp_gated_linear_units: bool = False,
     achieved_tflops: float = None,
@@ -2209,6 +2270,10 @@ def train(
         other_op_bytes (int, optional): the number of bytes in the optimizer state. Defaults to None, which assumes using Adam optimizer.
         flash_attn (bool, optional): whether to use Flash Attention. Defaults to True.
         softmax_dropout (bool, optional): whether to apply dropout after softmax. Defaults to False.
+        mlp_activation_quant_bits (int, optional): number of bits to quantize MLP activations; if set, override the values for mlp_1linear_quant_bits, mlp_gelu_input_quant_bits and mlp_2linear_quant_bits. Defaults to None.
+        mlp_1linear_quant_bits (int, optional): number of bits to quantize the input activations of the first linear layer. Defaults to None.
+        mlp_gelu_input_quant_bits (int, optional): number of bits to quantize the GELU input activations. Defaults to None.
+        mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.
         mlp_activation_quant_bits (int, optional): number of bits for the quantized MLP activation. Defaults to None.
         mlp_recompute_gelu (bool, optional): whether to recompute the GELU activation in the MLP backward pass. Defaults to False.
         mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
@@ -2279,6 +2344,9 @@ def train(
         flash_attn=flash_attn,
         softmax_dropout=softmax_dropout,
         mlp_activation_quant_bits=mlp_activation_quant_bits,
+        mlp_1linear_quant_bits=mlp_1linear_quant_bits,
+        mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
+        mlp_2linear_quant_bits=mlp_2linear_quant_bits,
         mlp_recompute_gelu=mlp_recompute_gelu,
         mlp_gated_linear_units=mlp_gated_linear_units,
         output_dir=output_dir,
