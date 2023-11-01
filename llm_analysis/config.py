@@ -318,15 +318,24 @@ def list_dtype_configs() -> None:
     logger.info(dtype_configs.keys())
 
 
-def get_model_config_by_name(name: str) -> ModelConfig:
-    """Get model config from the populated mapping by name, if not found, try to get it
-    from HuggingFace."""
-    if name in model_configs:
-        return model_configs[name]
-    model_config = get_model_config_from_hf(name)
+def get_model_config_by_name(name_or_path: str) -> ModelConfig:
+    """Get model config from the populated mapping by name, or from model config json file path, if not found from the previous methods, try to get it from HuggingFace."""
+    if name_or_path in model_configs:
+        return model_configs[name_or_path]
+    if os.path.isfile(name_or_path) and ".json" in name_or_path:
+        try:
+            with open(name_or_path, "r") as f:
+                config_json = json.load(f)
+                config = ModelConfig(**config_json)
+                if config.name not in model_configs:
+                    model_configs[config.name] = config
+            return config
+        except Exception as e:
+            raise ValueError(f"unknown gpu config name: {e}")
+    model_config = get_model_config_from_hf(name_or_path)
     if model_config is None:
         raise (
-            f"unknown model config name: {name}, and none found on HuggingFace Hub"
+            f"unknown model config name: {name_or_path}, and none is found on HuggingFace Hub"
         )
     return model_config
 

@@ -91,7 +91,9 @@ to check the options or read the linked doc. Refer to the [examples](examples) t
 
 The pre-defined mappings are populated at the runtime from the model, GPU, and data type configuration `json` files under [model_configs](llm_analysis/model_configs), [gpu_configs](llm_analysis/gpu_configs), and [dtype_configs](llm_analysis/dtype_configs). To add a new model, GPU or data type to the mapping for query, just add a `json` description file to the corresponding folder.
 
-llm-analysis also supports retrieving `ModelConfig` from Hugging Face with the model name (thus no need to add the model configuration to the `model_configs` folder). E.g. use [`EleutherAI/gpt-neox-20b`](https://huggingface.co/EleutherAI/gpt-neox-20b) as `model_name` when calling the `train` or `infer` entry functions.
+llm-analysis also supports retrieving `ModelConfig` from a model config json file path or Hugging Face with the model name .
+  - From a local model config json file, e.g., `python -m llm_analysis.analysis train --model_name=local_example_model.json`. Check the model configurations under the [model_configs](llm_analysis/model_configs) folder.
+  - From Hugging Face, e.g., use [`EleutherAI/gpt-neox-20b`](https://huggingface.co/EleutherAI/gpt-neox-20b) as `model_name` when calling the `train` or `infer` entry functions. `python -m llm_analysis.analysis train --model_name=EleutherAI/gpt-neox-20b --total_num_gpus 32 --ds_zero 3`
 
 A list of handy commands is provided to query against the pre-defined mappings as well as Hugging Face, or to dump configurations. Run ```python -m llm_analysis.config --help``` for details.
 

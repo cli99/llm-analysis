@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "llm-analysis"
-version = "0.2.0"
+version = "0.2.1"
 description = "Latency and Memory Analysis of Transformer Models for Training and Inference"
 authors = ["Cheng Li <pistasable@gmail.com>"]
 license = "Apache License, Version 2.0"

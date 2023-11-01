@@ -137,10 +137,6 @@ class LLMAnalysis:
             "hbm_memory_efficiency must be in (0, 1], check the achieved_memory_bandwidth_GBs and hbm_memory_efficiency passed in"
         )
         logger.info(f"hbm_memory_efficiency: {self.hbm_memory_efficiency}")
-        if self.hbm_memory_efficiency > 0.8:
-            logger.warning(
-                "Note that benchmarks show closer to 0.6-0.7 hbm_memory_efficiency in inference workloads"
-            )
 
         if achieved_tflops and flops_efficiency:
             logger.info(
@@ -505,6 +501,8 @@ class LLMAnalysis:
             if softmax_dropout:
                 # dropout mask only requires a single byte per element
                 memory_attn_compute += n_head * seq_len**2 * batch_size / tp_size
+        else:
+            memory_attn_compute = 0
 
         if is_inference:
             return max(
@@ -1306,6 +1304,14 @@ class LLMAnalysis:
     ):
         file_name = self.get_configs_desc(
         ) + output_file_suffix + "-summary.json"
+
+        if not os.path.exists(output_dir):
+            try:
+                os.makedirs(output_dir, exist_ok=True)
+                logger.info(f"Created directory: {output_dir}")
+            except:
+                logger.error(f"Failed to create output_dir {output_dir}")
+                exit()
         assert os.path.isdir(output_dir), f"{output_dir} is not a directory"
         with open(os.path.join(output_dir, file_name), "w") as f:
             json.dump(summary_dict, f, indent=4)
@@ -1642,7 +1648,7 @@ class LLMAnalysis:
         global_batch_size: int = None,
     ) -> tuple:
         """Configure batch_size_per_gpu, gradient_accumulation_steps and
-        global_batch_size (effective batch size). If any is not given (None), find a
+        global_batch_size (effective batch size). If none is given, find a
         maximum batch_size_per_gpu while satisfying the constraint `global_batch_size ==
         batch_size_per_gpu * gradient_accumulation_steps * dp_size`.
 
@@ -1677,8 +1683,13 @@ class LLMAnalysis:
                     (gradient_accumulation_steps * dp_size) == 0
                     and batch_size_per_gpu > 0
                     ), "no valid batch_size_per_gpu, {assert_msg}"
-        elif batch_size_per_gpu and gradient_accumulation_steps:
-            # global_batch_size is None, the other two are not None
+        elif batch_size_per_gpu and gradient_accumulation_steps or batch_size_per_gpu:
+            # batch_size_per_gpu is not None
+            assert (
+                batch_size_per_gpu <= max_batch_size_per_gpu
+            ), f"batch_size_per_gpu must be <= max_batch_size_per_gpu, {assert_msg}"
+            if gradient_accumulation_steps is None:
+                gradient_accumulation_steps = 1
             global_batch_size = (batch_size_per_gpu *
                                  gradient_accumulation_steps * dp_size)
         elif global_batch_size:
@@ -1703,7 +1714,7 @@ class LLMAnalysis:
                         f" {batch_size_per_gpu} (max_batch_size_per_gpu ="
                         f" {max_batch_size_per_gpu})")
         else:
-            # (global_batch_size and gradient_accumulation_steps are None) or (global_batch_size and batch_size_per_gpu are None) or (all are None)
+            # (global_batch_size and batch_size_per_gpu are None) or (all are None)
             batch_size_per_gpu = max_batch_size_per_gpu
             gradient_accumulation_steps = (1 if
                                            gradient_accumulation_steps is None
@@ -1862,6 +1873,9 @@ class LLMAnalysis:
 
         max_batch_size_per_gpu = int(memory_left //
                                      activation_memory_batch_size_1)
+
+        assert memory_left >= activation_memory_batch_size_1, f"memory_left {_num_to_string(memory_left)} < activation_memory_batch_size_1 {_num_to_string(activation_memory_batch_size_1)}"
+
         logger.info(
             f"activation_memory_batch_size_1: {_num_to_string(activation_memory_batch_size_1)}B, activation_memory_embedding_output_per_gpu: {_num_to_string(activation_memory_embedding_output_per_gpu)}B, max_batch_size_per_gpu: {max_batch_size_per_gpu}"
         )
@@ -2137,7 +2151,7 @@ def infer(
     """_summary_
 
     Args:
-        model_name (str, optional): model name to query the pre-defined `model_configs` dict, if not found, query Hugging Face to construct ModelConfig. Defaults to "facebook_opt-1.3b".
+        model_name (str, optional): model name to query the pre-defined `model_configs` dict, or model config json file path, if not found, query Hugging Face to construct ModelConfig. Defaults to "facebook_opt-1.3b".
         gpu_name (str, optional): gpu name to query the pre-defined `gpu_configs` dict. Defaults to "a100-sxm-40gb".
         dtype_name (str, optional): data type name to pre-defined `dtype_configs` dict. Defaults to "w16a16e16".
         log_level (str, optional): logging level. Defaults to "INFO".
@@ -2165,6 +2179,7 @@ def infer(
     Returns:
         dict: a summary dictionary of the inference analysis
     """
+
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
@@ -2188,6 +2203,11 @@ def infer(
         intra_node_memory_efficiency=intra_node_memory_efficiency,
         inter_node_memory_efficiency=inter_node_memory_efficiency,
     )
+
+    if analysis.hbm_memory_efficiency > 0.8:
+        logger.warning(
+            "Note that benchmarks show closer to 0.6-0.7 hbm_memory_efficiency in inference workloads"
+        )
 
     summary_dict = analysis.inference(
         batch_size_per_gpu=batch_size_per_gpu,
@@ -2248,7 +2268,7 @@ def train(
     LLMAnalysis.
 
     Args:
-        model_name (str, optional): model name to query the pre-defined `model_configs` dict, if not found, query Hugging Face to construct ModelConfig. Defaults to "facebook_opt-1.3b".
+        model_name (str, optional): model name to query the pre-defined `model_configs` dict, or model config json file path, if not found, query Hugging Face to construct ModelConfig. Defaults to "facebook_opt-1.3b".
         gpu_name (str, optional): gpu name to query the pre-defined `gpu_configs` dict. Defaults to "a100-sxm-40gb".
         dtype_name (str, optional): data type name to pre-defined `dtype_configs` dict. Defaults to "w16a16e16".
         log_level (str, optional): logging level. Defaults to "INFO".
