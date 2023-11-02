@@ -2360,6 +2360,7 @@ def train(
         ds_zero=DSZeRO(ds_zero),
         layernorm_dtype_bytes=layernorm_dtype_bytes,
         master_weights_dtype_bytes=master_weights_dtype_bytes,
+        other_op_bytes=other_op_bytes,
         flash_attn=flash_attn,
         softmax_dropout=softmax_dropout,
         mlp_activation_quant_bits=mlp_activation_quant_bits,
