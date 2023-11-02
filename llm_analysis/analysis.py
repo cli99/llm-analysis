@@ -581,7 +581,6 @@ class LLMAnalysis:
             bytes_per_2linear_input = mlp_activation_quant_bits / BITS_PER_BYTE
 
         num_experts_per_gpu = self.model_config.moe_num_experts / ep_size
-        assert self.model_config.moe_top_k <= num_experts_per_gpu, f'moe_top_k: {self.model_config.moe_top_k} must be <= num_experts_per_gpu: {num_experts_per_gpu}'
 
         if is_inference:
             return max(
