@@ -366,6 +366,7 @@ class LLMAnalysis:
         else:
             sharded_dp_size = 1
             mlp_sharded_dp_size = 1
+
         memory_weight_attn_per_layer = self.get_num_params_per_layer_attn(
         ) * self.dtype_config.weight_bits / BITS_PER_BYTE / self.parallelism_config.tp_size / sharded_dp_size
 
@@ -414,20 +415,47 @@ class LLMAnalysis:
         Returns:
             tuple: a tuple of the memory (in bytes) required to store the optimizer states and gradients of a transformer layer
         """
-        memory_optimizer_state_per_layer = (
-            BYTES_FP32 +
-            2 * BYTES_FP32 if other_op_bytes is None else other_op_bytes
-        ) * self.get_num_params_per_layer() / self.parallelism_config.tp_size
 
         if ds_zero >= DSZeRO.STAGE_1:
-            memory_optimizer_state_per_layer /= self.parallelism_config.dp_size
+            sharded_dp_size = self.parallelism_config.dp_size
+            mlp_sharded_dp_size = self.parallelism_config.dp_size / self.parallelism_config.ep_size
+        else:
+            sharded_dp_size = 1
+            mlp_sharded_dp_size = 1
 
-        memory_gradient_per_layer = (1 * self.get_num_params_per_layer() *
-                                     master_weights_dtype_bytes /
-                                     self.parallelism_config.tp_size)
+        if other_op_bytes is None:
+            op_bytes_per_params = BYTES_FP32 + 2 * BYTES_FP32  # adam optimizer
+        else:
+            op_bytes_per_params = (other_op_bytes + master_weights_dtype_bytes)
+
+        memory_optimizer_state_mlp_per_layer = op_bytes_per_params * self.get_num_params_per_layer_mlp(
+        ) / self.parallelism_config.ep_size / self.parallelism_config.tp_size / mlp_sharded_dp_size
+
+        memory_optimizer_state_others_per_layer = op_bytes_per_params * (
+            (self.get_num_params_per_layer_attn() +
+             +self.get_num_params_per_layer_router() +
+             self.get_num_params_per_layer_layernorm())
+        ) / self.parallelism_config.tp_size / sharded_dp_size
+
+        memory_optimizer_state_per_layer = memory_optimizer_state_mlp_per_layer + memory_optimizer_state_others_per_layer
 
         if ds_zero >= DSZeRO.STAGE_2:
-            memory_gradient_per_layer /= self.parallelism_config.dp_size
+            sharded_dp_size = self.parallelism_config.dp_size
+            mlp_sharded_dp_size = self.parallelism_config.dp_size / self.parallelism_config.ep_size
+        else:
+            sharded_dp_size = 1
+            mlp_sharded_dp_size = 1
+
+        memory_gradient_mlp_per_layer = 1 * self.get_num_params_per_layer_mlp(
+        ) * master_weights_dtype_bytes / self.parallelism_config.ep_size / self.parallelism_config.tp_size / mlp_sharded_dp_size
+
+        memory_gradient_others_per_layer = 1 * (
+            self.get_num_params_per_layer_attn() +
+            +self.get_num_params_per_layer_router() +
+            self.get_num_params_per_layer_layernorm()
+        ) * master_weights_dtype_bytes / self.parallelism_config.tp_size / sharded_dp_size
+
+        memory_gradient_per_layer = memory_gradient_mlp_per_layer + memory_gradient_others_per_layer
 
         return memory_optimizer_state_per_layer, memory_gradient_per_layer
 
