@@ -123,7 +123,7 @@ def test_training_megatron_lm_3():
     pp_size = 35
     total_num_gpus = 560
     dp_size = total_num_gpus // (tp_size * pp_size)
-    batch_size_per_gpu = 6
+    batch_size_per_gpu = 1
 
     achieved_tflops = 171  # reported in the paper
 
