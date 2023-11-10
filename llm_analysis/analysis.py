@@ -554,7 +554,7 @@ class LLMAnalysis:
         length, whether it is inference or training, the activation
         recomputation strategy, and the activation data type. The `attn`
         activations include the input to Q/K/V gemm, QK^T matrix multiply,
-        softmax, softmax dropoutattention over V, the input to the attention
+        softmax, softmax dropout attention over V, the input to the attention
         output Gemm; if training, also include the softmax dropout mask and
         attention dropout mask; Refer to https://arxiv.org/abs/2205.05198 for
         details.
@@ -730,7 +730,7 @@ class LLMAnalysis:
 
     def get_memory_activation_embedding_output(self, batch_size: int,
                                                seq_len: int) -> float:
-        """Get the memory (in bytes) required to store the activations of outpu embedding (logits)"""
+        """Get the memory (in bytes) required to store the activations of output embedding (logits)"""
         return 2 * self.model_config.vocab_size * batch_size * seq_len * self.dtype_config.activation_bits / BITS_PER_BYTE / self.parallelism_config.tp_size
 
     def get_memory_activation_per_layer(
