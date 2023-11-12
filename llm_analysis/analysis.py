@@ -348,7 +348,7 @@ class LLMAnalysis:
                 self.get_num_params_embedding() +
                 self.get_num_params_last_layernorm())
 
-    def get_memory_weight_per_layer(
+    def get_weight_memory_per_layer(
             self,
             ds_zero: DSZeRO = DSZeRO.NONE,
             return_breakdown: bool = False) -> Union[float, tuple]:
@@ -370,34 +370,34 @@ class LLMAnalysis:
             sharded_dp_size = 1
             mlp_sharded_dp_size = 1
 
-        memory_weight_attn_per_layer = self.get_num_params_per_layer_attn(
+        weight_memory_attn_per_layer = self.get_num_params_per_layer_attn(
         ) * self.dtype_config.weight_bits / BITS_PER_BYTE / self.parallelism_config.tp_size / sharded_dp_size
 
-        memory_weight_mlp_per_layer = (
+        weight_memory_mlp_per_layer = (
             self.get_num_params_per_layer_mlp() /
             self.parallelism_config.ep_size +
             self.get_num_params_per_layer_router()
         ) * self.dtype_config.weight_bits / BITS_PER_BYTE / self.parallelism_config.tp_size / mlp_sharded_dp_size
 
-        memory_weight_layernorm_per_layer = self.get_num_params_per_layer_layernorm(
+        weight_memory_layernorm_per_layer = self.get_num_params_per_layer_layernorm(
         ) * self.dtype_config.weight_bits / BITS_PER_BYTE / self.parallelism_config.tp_size / sharded_dp_size
 
-        memory_weight_per_layer = memory_weight_attn_per_layer + memory_weight_mlp_per_layer + memory_weight_layernorm_per_layer
+        weight_memory_per_layer = weight_memory_attn_per_layer + weight_memory_mlp_per_layer + weight_memory_layernorm_per_layer
 
         logger.info(
-            f'memory_weight_attn_per_layer: {_num_to_string(memory_weight_attn_per_layer)}B, memory_weight_mlp_per_layer: {_num_to_string(memory_weight_mlp_per_layer)}B, memory_weight_layernorm_per_layer: {_num_to_string(memory_weight_layernorm_per_layer)}B'
+            f'weight_memory_attn_per_layer: {_num_to_string(weight_memory_attn_per_layer)}B, weight_memory_mlp_per_layer: {_num_to_string(weight_memory_mlp_per_layer)}B, weight_memory_layernorm_per_layer: {_num_to_string(weight_memory_layernorm_per_layer)}B'
         )
 
         if return_breakdown:
-            return memory_weight_per_layer, memory_weight_attn_per_layer, memory_weight_mlp_per_layer, memory_weight_layernorm_per_layer
-        return memory_weight_per_layer
+            return weight_memory_per_layer, weight_memory_attn_per_layer, weight_memory_mlp_per_layer, weight_memory_layernorm_per_layer
+        return weight_memory_per_layer
 
-    def get_memory_weight_last_layernorm(self, ds_zero: DSZeRO = DSZeRO.NONE):
-        memory_weight_last_layernorm = self.get_num_params_last_layernorm(
+    def get_weight_memory_last_layernorm(self, ds_zero: DSZeRO = DSZeRO.NONE):
+        weight_memory_last_layernorm = self.get_num_params_last_layernorm(
         ) * self.dtype_config.weight_bits / BITS_PER_BYTE / self.parallelism_config.tp_size
         if ds_zero == DSZeRO.STAGE_3:
-            memory_weight_last_layernorm /= self.parallelism_config.dp_size
-        return memory_weight_last_layernorm
+            weight_memory_last_layernorm /= self.parallelism_config.dp_size
+        return weight_memory_last_layernorm
 
     def get_memory_optimizer_state_and_gradient_embedding(
         self,
@@ -538,7 +538,7 @@ class LLMAnalysis:
 
         return memory_embedding
 
-    def get_memory_activation_per_layer_attn(
+    def get_activation_memory_per_layer_attn(
         self,
         batch_size: int,
         seq_len: int,
@@ -601,17 +601,17 @@ class LLMAnalysis:
                 3 * bytes_per_activation * seq_len * batch_size * hidden_dim /
                 sp_size, memory_attn_compute)
 
-        memory_activation_per_layer_attn = (
+        activation_memory_per_layer_attn = (
             seq_len * batch_size * hidden_dim / sp_size +
             4 * seq_len * batch_size * hidden_dim /
             tp_size) * bytes_per_activation + memory_attn_compute
 
         if attn_dropout:
-            memory_activation_per_layer_attn += seq_len * batch_size * hidden_dim / sp_size
+            activation_memory_per_layer_attn += seq_len * batch_size * hidden_dim / sp_size
 
-        return memory_activation_per_layer_attn
+        return activation_memory_per_layer_attn
 
-    def get_memory_activation_per_layer_mlp(
+    def get_activation_memory_per_layer_mlp(
         self,
         batch_size: int,
         seq_len: int,
@@ -680,27 +680,28 @@ class LLMAnalysis:
                 bytes_per_gelu_input * self.model_config.expansion_ratio
             ) * seq_len * batch_size * hidden_dim * self.model_config.moe_top_k / tp_size
 
-        memory_activation_per_layer_mlp = bytes_per_1linear_input * seq_len * batch_size * hidden_dim * self.model_config.moe_top_k / sp_size
+        activation_memory_per_layer_mlp = bytes_per_1linear_input * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / sp_size
+
         if recompute_gelu and gated_linear_units:
             # swiglu decreases the expansion ratio by 2/3 to get isoparam
-            memory_activation_per_layer_mlp += (
+            activation_memory_per_layer_mlp += (
                 1 / 3 * bytes_per_gelu_input
             ) * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / tp_size
         elif recompute_gelu:
-            memory_activation_per_layer_mlp += bytes_per_gelu_input * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / tp_size
+            activation_memory_per_layer_mlp += bytes_per_gelu_input * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / tp_size
         else:
-            memory_activation_per_layer_mlp += (
+            activation_memory_per_layer_mlp += (
                 bytes_per_gelu_input + bytes_per_2linear_input
             ) * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / tp_size
 
         # dropout mask only requires a single byte per element
         if with_dropout:
             drop_out_mask = seq_len * batch_size * hidden_dim / sp_size
-            memory_activation_per_layer_mlp += drop_out_mask
+            activation_memory_per_layer_mlp += drop_out_mask
 
-        return memory_activation_per_layer_mlp
+        return activation_memory_per_layer_mlp
 
-    def get_memory_activation_per_layernorm(
+    def get_activation_memory_per_layernorm(
         self,
         batch_size: int,
         seq_len: int,
@@ -728,12 +729,12 @@ class LLMAnalysis:
         return (seq_len * batch_size * self.model_config.hidden_dim /
                 self.parallelism_config.sp_size) * dtype_bytes
 
-    def get_memory_activation_embedding_output(self, batch_size: int,
+    def get_activation_memory_output_embedding(self, batch_size: int,
                                                seq_len: int) -> float:
         """Get the memory (in bytes) required to store the activations of output embedding (logits)"""
-        return 2 * self.model_config.vocab_size * batch_size * seq_len * self.dtype_config.activation_bits / BITS_PER_BYTE / self.parallelism_config.tp_size
+        return self.model_config.vocab_size * batch_size * seq_len * self.dtype_config.activation_bits / BITS_PER_BYTE / self.parallelism_config.tp_size
 
-    def get_memory_activation_per_layer(
+    def get_activation_memory_per_layer(
         self,
         batch_size: int,
         seq_len: int,
@@ -777,18 +778,18 @@ class LLMAnalysis:
         """
         if (not is_inference
             ) and activation_recomputation == ActivationRecomputation.FULL:
-            memory_activation_per_layer = (seq_len * batch_size *
+            activation_memory_per_layer = (seq_len * batch_size *
                                            self.model_config.hidden_dim *
                                            self.dtype_config.activation_bits /
                                            BITS_PER_BYTE /
                                            self.parallelism_config.tp_size)
             if return_breakdown:
-                return memory_activation_per_layer, 0, 0, 0
+                return activation_memory_per_layer, 0, 0, 0
             else:
-                return memory_activation_per_layer
+                return activation_memory_per_layer
 
-        memory_activation_per_layer_attn = (
-            self.get_memory_activation_per_layer_attn(
+        activation_memory_per_layer_attn = (
+            self.get_activation_memory_per_layer_attn(
                 batch_size,
                 seq_len,
                 is_inference,
@@ -796,8 +797,8 @@ class LLMAnalysis:
                 softmax_dropout=softmax_dropout,
                 activation_recomputation=activation_recomputation))
 
-        memory_activation_per_layer_mlp = (
-            self.get_memory_activation_per_layer_mlp(
+        activation_memory_per_layer_mlp = (
+            self.get_activation_memory_per_layer_mlp(
                 batch_size,
                 seq_len,
                 is_inference,
@@ -810,7 +811,7 @@ class LLMAnalysis:
                 gated_linear_units=mlp_gated_linear_units,
             ))
 
-        memory_activation_per_layernorm = self.get_memory_activation_per_layernorm(
+        activation_memory_per_layernorm = self.get_activation_memory_per_layernorm(
             batch_size,
             seq_len,
             activation_recomputation,
@@ -818,28 +819,28 @@ class LLMAnalysis:
         )
 
         if is_inference:
-            memory_activation_per_layer = max(memory_activation_per_layer_attn,
-                                              memory_activation_per_layer_mlp,
-                                              memory_activation_per_layernorm)
+            activation_memory_per_layer = max(activation_memory_per_layer_attn,
+                                              activation_memory_per_layer_mlp,
+                                              activation_memory_per_layernorm)
             logger.info(
-                f"memory_activation_per_layer for batch_size {batch_size}:"
-                f" {_num_to_string(memory_activation_per_layer)}B"
-                f" (max(attn, mlp, layernorm): max({_num_to_string(memory_activation_per_layer_attn)}B ,"
-                f" {_num_to_string(memory_activation_per_layer_mlp)}B , 2 *"
-                f" {_num_to_string(2*memory_activation_per_layernorm)}B))")
+                f"activation_memory_per_layer for batch_size {batch_size}:"
+                f" {_num_to_string(activation_memory_per_layer)}B"
+                f" (max(attn, mlp, layernorm): max({_num_to_string(activation_memory_per_layer_attn)}B ,"
+                f" {_num_to_string(activation_memory_per_layer_mlp)}B , 2 *"
+                f" {_num_to_string(2*activation_memory_per_layernorm)}B))")
         else:
-            memory_activation_per_layer = (memory_activation_per_layer_attn +
-                                           memory_activation_per_layer_mlp +
-                                           2 * memory_activation_per_layernorm)
+            activation_memory_per_layer = (activation_memory_per_layer_attn +
+                                           activation_memory_per_layer_mlp +
+                                           2 * activation_memory_per_layernorm)
             logger.info(
-                f"memory_activation_per_layer for batch_size {batch_size}:"
-                f" {_num_to_string(memory_activation_per_layer)}B"
-                f" (attn + mlp + layernorm: {_num_to_string(memory_activation_per_layer_attn)}B +"
-                f" {_num_to_string(memory_activation_per_layer_mlp)}B + 2 *"
-                f" {_num_to_string(memory_activation_per_layernorm)}B)")
+                f"activation_memory_per_layer for micro batch size {batch_size}:"
+                f" {_num_to_string(activation_memory_per_layer)}B"
+                f" (attn + mlp + layernorm: {_num_to_string(activation_memory_per_layer_attn)}B +"
+                f" {_num_to_string(activation_memory_per_layer_mlp)}B + 2 *"
+                f" {_num_to_string(activation_memory_per_layernorm)}B)")
         if return_breakdown:
-            return memory_activation_per_layer, memory_activation_per_layer_attn, memory_activation_per_layer_mlp, 2 * memory_activation_per_layernorm
-        return memory_activation_per_layer
+            return activation_memory_per_layer, activation_memory_per_layer_attn, activation_memory_per_layer_mlp, 2 * activation_memory_per_layernorm
+        return activation_memory_per_layer
 
     def get_memory_kv_cache_per_layer(
         self,
@@ -1030,7 +1031,7 @@ class LLMAnalysis:
         weight_memory_latency = (weight_memory / tp_size /
                                  (self.get_gpu_hbm_bandwidth() * 10**9))
 
-        activation_memory = self.get_memory_activation_per_layer_attn(
+        activation_memory = self.get_activation_memory_per_layer_attn(
             batch_size, seq_len, is_inference, activation_recomputation)
         activation_memory_latency = activation_memory / (
             self.get_gpu_hbm_bandwidth() * 10**9)
@@ -1081,7 +1082,7 @@ class LLMAnalysis:
         weight_memory_latency = (weight_memory / tp_size /
                                  (self.get_gpu_hbm_bandwidth() * 10**9))
 
-        activation_memory = self.get_memory_activation_per_layer_mlp(
+        activation_memory = self.get_activation_memory_per_layer_mlp(
             batch_size, seq_len, is_inference, activation_recomputation)
         activation_memory_latency = activation_memory / (
             self.get_gpu_hbm_bandwidth() * 10**9)
@@ -1121,7 +1122,7 @@ class LLMAnalysis:
         Returns:
             float: the latency in seconds for the forward pass of a single layernorm in a transformer layer
         """
-        activation_memory = self.get_memory_activation_per_layernorm(
+        activation_memory = self.get_activation_memory_per_layernorm(
             batch_size,
             seq_len,
         )
@@ -1472,14 +1473,14 @@ class LLMAnalysis:
         weight_memory_embedding_per_gpu = self.get_memory_embedding(ds_zero)
         weight_memory_layers_per_gpu, weight_memory_attn_per_gpu, weight_memory_mlp_per_gpu, weight_memory_layernorm_per_gpu = [
             x * self.model_config.num_layers
-            for x in self.get_memory_weight_per_layer(ds_zero,
+            for x in self.get_weight_memory_per_layer(ds_zero,
                                                       return_breakdown=True)
         ]
-        memory_weight_last_layernorm = self.get_memory_weight_last_layernorm(
+        weight_memory_last_layernorm = self.get_weight_memory_last_layernorm(
             ds_zero)
         weight_memory_per_gpu = (weight_memory_layers_per_gpu +
                                  weight_memory_embedding_per_gpu +
-                                 memory_weight_last_layernorm)
+                                 weight_memory_last_layernorm)
 
         memory_left = (self.gpu_config.mem_per_GPU_in_GB * 1024**3 -
                        weight_memory_per_gpu)
@@ -1495,18 +1496,18 @@ class LLMAnalysis:
             f" {_num_to_string(memory_left)}B")
 
         # With pipeline parallelism, each stage contains L/p layers so the first stage must store p ×L/p = L layers worth of activations regardless of the pipeline parallel size p; activation memory required for the input embeddings, the last layer-norm, and the output layer are ignored here. Refer to https://arxiv.org/abs/2205.05198 for more details.
-        prefill_memory_activation_per_layer_batch_size_1 = self.get_memory_activation_per_layer(
+        prefill_activation_memory_per_layer_batch_size_1 = self.get_activation_memory_per_layer(
             1,
             seq_len,
             is_inference=True,
             layernorm_dtype_bytes=layernorm_dtype_bytes,
         )
-        prefill_memory_activation_embedding_output_batch_size_1 = self.get_memory_activation_embedding_output(
+        prefill_activation_memory_embedding_output_batch_size_1 = self.get_activation_memory_output_embedding(
             1, seq_len)
 
         prefill_activation_memory_batch_size_1 = max(
-            prefill_memory_activation_per_layer_batch_size_1,
-            prefill_memory_activation_embedding_output_batch_size_1)
+            prefill_activation_memory_per_layer_batch_size_1,
+            prefill_activation_memory_embedding_output_batch_size_1)
 
         prefill_max_batch_size_per_gpu = int(
             memory_left / prefill_activation_memory_batch_size_1)
@@ -1515,17 +1516,17 @@ class LLMAnalysis:
             " prefill_max_batch_size_per_gpu:"
             f" {prefill_max_batch_size_per_gpu}")
 
-        prefill_memory_activation_per_layer = self.get_memory_activation_per_layer(
+        prefill_activation_memory_per_layer = self.get_activation_memory_per_layer(
             batch_size_per_gpu,
             seq_len,
             is_inference=True,
             layernorm_dtype_bytes=layernorm_dtype_bytes,
         )
-        prefill_memory_activation_embedding_output = self.get_memory_activation_embedding_output(
+        prefill_activation_memory_embedding_output = self.get_activation_memory_output_embedding(
             batch_size_per_gpu, seq_len)
         prefill_activation_memory_per_gpu = max(
-            prefill_memory_activation_per_layer,
-            prefill_memory_activation_embedding_output)
+            prefill_activation_memory_per_layer,
+            prefill_activation_memory_embedding_output)
 
         logger.info("prefill_activation_memory_per_gpu with batch_size_per_gpu"
                     f" {batch_size_per_gpu}:"
@@ -1553,8 +1554,8 @@ class LLMAnalysis:
         )
 
         if use_kv_cache:
-            if (batch_size_per_gpu *
-                (seq_len + num_tokens_to_generate) < self.get_pivot()):
+            if (batch_size_per_gpu * (seq_len + num_tokens_to_generate)
+                    < self.get_pivot()):
                 logger.warning(
                     "kv_cache is only useful when batch_size *"
                     " (seq+num_tokens_to_generate)"
@@ -1571,17 +1572,17 @@ class LLMAnalysis:
             kv_cache_latency = (2 * kv_cache_memory_per_gpu /
                                 (self.get_gpu_hbm_bandwidth() * 10**9))
 
-            decode_activation_memory_per_layer = self.get_memory_activation_per_layer(
+            decode_activation_memory_per_layer = self.get_activation_memory_per_layer(
                 batch_size_per_gpu,
                 1,
                 is_inference=True,
                 layernorm_dtype_bytes=layernorm_dtype_bytes,
             )
-            decode_memory_activation_embedding_output = self.get_memory_activation_embedding_output(
+            decode_activation_memory_embedding_output = self.get_activation_memory_output_embedding(
                 batch_size_per_gpu, 1)
             decode_activation_memory_per_gpu = max(
                 decode_activation_memory_per_layer,
-                decode_memory_activation_embedding_output)
+                decode_activation_memory_embedding_output)
 
             logger.info(
                 "kv_cache_memory_per_gpu:"
@@ -1617,7 +1618,7 @@ class LLMAnalysis:
                 f" {decode_max_batch_size_per_gpu}")
 
             decode_activation_memory_per_layer = (
-                self.get_memory_activation_per_layer(
+                self.get_activation_memory_per_layer(
                     batch_size_per_gpu,
                     seq_len + num_tokens_to_generate,
                     is_inference=True,
@@ -1767,16 +1768,16 @@ class LLMAnalysis:
             gradient_accumulation_steps = global_batch_size // (
                 batch_size_per_gpu * dp_size)
             assert (global_batch_size % (batch_size_per_gpu * dp_size) == 0
-                    and gradient_accumulation_steps > 0
-                    ), "no valid gradient_accumulation_steps, {assert_msg}"
+                    and gradient_accumulation_steps
+                    > 0), "no valid gradient_accumulation_steps, {assert_msg}"
         elif global_batch_size and gradient_accumulation_steps:
             # batch_size_per_gpu is None, the other two are not None
             batch_size_per_gpu = global_batch_size // (
                 gradient_accumulation_steps * dp_size)
             assert (global_batch_size %
                     (gradient_accumulation_steps * dp_size) == 0
-                    and batch_size_per_gpu > 0
-                    ), "no valid batch_size_per_gpu, {assert_msg}"
+                    and batch_size_per_gpu
+                    > 0), "no valid batch_size_per_gpu, {assert_msg}"
         elif batch_size_per_gpu and gradient_accumulation_steps or batch_size_per_gpu:
             # batch_size_per_gpu is not None
             assert (
@@ -1810,9 +1811,9 @@ class LLMAnalysis:
         else:
             # (global_batch_size and batch_size_per_gpu are None) or (all are None)
             batch_size_per_gpu = max_batch_size_per_gpu
-            gradient_accumulation_steps = (1 if
-                                           gradient_accumulation_steps is None
-                                           else gradient_accumulation_steps)
+            gradient_accumulation_steps = (1 if gradient_accumulation_steps
+                                           is None else
+                                           gradient_accumulation_steps)
             global_batch_size = (batch_size_per_gpu *
                                  gradient_accumulation_steps *
                                  self.parallelism_config.dp_size)
@@ -1906,10 +1907,10 @@ class LLMAnalysis:
 
         weight_memory_layers_per_gpu, weight_memory_attn_per_gpu, weight_memory_mlp_per_gpu, weight_memory_layernorm_per_gpu = [
             x * num_layers_per_gpu
-            for x in self.get_memory_weight_per_layer(ds_zero,
+            for x in self.get_weight_memory_per_layer(ds_zero,
                                                       return_breakdown=True)
         ]
-        weight_memory_last_layernorm = self.get_memory_weight_last_layernorm(
+        weight_memory_last_layernorm = self.get_weight_memory_last_layernorm(
             ds_zero)
         weight_memory_per_gpu = (weight_memory_embedding_per_gpu +
                                  weight_memory_layers_per_gpu +
@@ -1935,7 +1936,7 @@ class LLMAnalysis:
             f"weight_memory_per_gpu: {_num_to_string(weight_memory_per_gpu)}B"
             " (embedding_memory:"
             f" {_num_to_string(weight_memory_embedding_per_gpu)}B),"
-            " \noptimizer_state_memory_per_gpu:"
+            " optimizer_state_memory_per_gpu:"
             f" {_num_to_string(optimizer_state_memory_per_gpu)}B,"
             " gradient_memory_per_gpu:"
             f" {_num_to_string(gradient_memory_per_gpu)}B, memory_left:"
@@ -1952,7 +1953,7 @@ class LLMAnalysis:
 
         activation_memory_batch_size_1, activation_memory_attn_batch_size_1, mlp_activation_memory_batch_size_1, layernorm_activation_memory_batch_size_1 = [
             x * self.model_config.num_layers
-            for x in self.get_memory_activation_per_layer(
+            for x in self.get_activation_memory_per_layer(
                 1,
                 seq_len,
                 is_inference=False,
@@ -1969,10 +1970,13 @@ class LLMAnalysis:
                 return_breakdown=True,
             )
         ]
-        activation_memory_embedding_output_per_gpu = self.get_memory_activation_embedding_output(
+        activation_memory_embedding_output_batch_size_1 = self.get_activation_memory_output_embedding(
             1, seq_len)
-        activation_memory_batch_size_1 += activation_memory_embedding_output_per_gpu
-        activation_memory_batch_size_1 += self.get_memory_activation_per_layernorm(
+        logger.info(
+            f"activation_memory_embedding_output for micro batch size 1: {_num_to_string(activation_memory_embedding_output_batch_size_1)}B"
+        )
+        activation_memory_batch_size_1 += activation_memory_embedding_output_batch_size_1
+        activation_memory_batch_size_1 += self.get_activation_memory_per_layernorm(
             1,
             seq_len,
             activation_recomputation,
@@ -1985,7 +1989,7 @@ class LLMAnalysis:
         assert memory_left >= activation_memory_batch_size_1, f"memory_left {_num_to_string(memory_left)} < activation_memory_batch_size_1 {_num_to_string(activation_memory_batch_size_1)}"
 
         logger.info(
-            f"activation_memory_batch_size_1: {_num_to_string(activation_memory_batch_size_1)}B, activation_memory_embedding_output_per_gpu: {_num_to_string(activation_memory_embedding_output_per_gpu)}B, max_batch_size_per_gpu: {max_batch_size_per_gpu}"
+            f"activation_memory for micro batch size 1: {_num_to_string(activation_memory_batch_size_1)}B, max_batch_size_per_gpu: {max_batch_size_per_gpu}"
         )
 
         (
@@ -2004,7 +2008,7 @@ class LLMAnalysis:
         else:
             activation_memory_per_gpu, activation_memory_attn_per_gpu, activation_memory_mlp_per_gpu, activation_memory_layernorm_per_gpu = [
                 x * self.model_config.num_layers
-                for x in self.get_memory_activation_per_layer(
+                for x in self.get_activation_memory_per_layer(
                     batch_size_per_gpu,
                     seq_len,
                     is_inference=False,
@@ -2020,17 +2024,17 @@ class LLMAnalysis:
                     return_breakdown=True,
                 )
             ]
-            activation_memory_embedding_output_per_gpu = self.get_memory_activation_embedding_output(
+            activation_memory_embedding_output_per_gpu = self.get_activation_memory_output_embedding(
                 batch_size_per_gpu, seq_len)
             activation_memory_per_gpu += activation_memory_embedding_output_per_gpu
-            activation_memory_per_gpu += self.get_memory_activation_per_layernorm(
+            activation_memory_per_gpu += self.get_activation_memory_per_layernorm(
                 batch_size_per_gpu,
                 seq_len,
                 activation_recomputation,
                 layernorm_dtype_bytes,
             )
 
-        logger.info("activation_memory_per_gpu with batch_size_per_gpu"
+        logger.info("activation_memory_per_gpu with micro batch size"
                     f" {batch_size_per_gpu}:"
                     f" {_num_to_string(activation_memory_per_gpu)}B")
         assert memory_left > activation_memory_per_gpu, (
@@ -2115,16 +2119,19 @@ class LLMAnalysis:
                 f" = {round(total_training_latency/3600/24, 3)} days"
                 f" ({round(latency_per_iter * 1000, 3)} ms x"
                 f" {num_iters} iters)")
-            estimated_total_training_latency = (
-                (8 if activation_recomputation == ActivationRecomputation.FULL
-                 else 6) * self.total_num_params * total_num_tokens /
-                (total_num_gpus * self.get_TFLOPS_per_gpu() * 1e12))
-            if not within_range(total_training_latency,
-                                estimated_total_training_latency, 0.05):
-                logger.warning(
-                    f"total_training_latency ({total_training_latency}) is too"
-                    " different from estimated_total_training_latency"
-                    f" ({estimated_total_training_latency})")
+            if self.model_config.moe_num_experts == 1:
+                # dense models
+                estimated_total_training_latency = (
+                    (8 if activation_recomputation
+                     == ActivationRecomputation.FULL else 6) *
+                    self.total_num_params * total_num_tokens /
+                    (total_num_gpus * self.get_TFLOPS_per_gpu() * 1e12))
+                if not within_range(total_training_latency,
+                                    estimated_total_training_latency, 0.05):
+                    logger.warning(
+                        f"total_training_latency ({total_training_latency}) is too"
+                        " different from estimated_total_training_latency"
+                        f" ({estimated_total_training_latency})")
 
         else:
             total_training_latency = None
