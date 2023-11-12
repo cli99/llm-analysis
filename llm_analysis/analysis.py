@@ -1942,12 +1942,13 @@ class LLMAnalysis:
             f" {_num_to_string(gradient_memory_per_gpu)}B, memory_left:"
             f" {_num_to_string(memory_left)}B")
 
-        assert memory_left > 0, (
-            "model weight/optimizer stage/gradient is too large (requiring"
-            f" {_num_to_string(weight_memory_per_gpu)}B /"
-            f" {_num_to_string(optimizer_state_memory_per_gpu)}B /"
-            f" {_num_to_string(gradient_memory_per_gpu)}B) to fit in total GPU"
-            " memory")
+        if memory_left < 0:
+            logger.warning(
+                "model weight/optimizer stage/gradient is too large (requiring"
+                f" {_num_to_string(weight_memory_per_gpu)}B /"
+                f" {_num_to_string(optimizer_state_memory_per_gpu)}B /"
+                f" {_num_to_string(gradient_memory_per_gpu)}B) to fit in total GPU"
+                " memory")
 
         # With pipeline parallelism, each stage contains L/p layers so the first stage must store p ×L/p = L layers worth of activations regardless of the pipeline parallel size p; activation memory required for the input embeddings, the last layer-norm, and the output layer are ignored here. Refer to https://arxiv.org/abs/2205.05198 for more details.
 
@@ -1986,7 +1987,10 @@ class LLMAnalysis:
         max_batch_size_per_gpu = int(memory_left //
                                      activation_memory_batch_size_1)
 
-        assert memory_left >= activation_memory_batch_size_1, f"memory_left {_num_to_string(memory_left)} < activation_memory_batch_size_1 {_num_to_string(activation_memory_batch_size_1)}"
+        if memory_left < activation_memory_batch_size_1:
+            logger.warning(
+                f"memory_left {_num_to_string(memory_left)} < activation_memory_batch_size_1 {_num_to_string(activation_memory_batch_size_1)}"
+            )
 
         logger.info(
             f"activation_memory for micro batch size 1: {_num_to_string(activation_memory_batch_size_1)}B, max_batch_size_per_gpu: {max_batch_size_per_gpu}"
@@ -2024,26 +2028,27 @@ class LLMAnalysis:
                     return_breakdown=True,
                 )
             ]
-            activation_memory_embedding_output_per_gpu = self.get_activation_memory_output_embedding(
-                batch_size_per_gpu, seq_len)
-            activation_memory_per_gpu += activation_memory_embedding_output_per_gpu
-            activation_memory_per_gpu += self.get_activation_memory_per_layernorm(
-                batch_size_per_gpu,
-                seq_len,
-                activation_recomputation,
-                layernorm_dtype_bytes,
-            )
+        activation_memory_embedding_output_per_gpu = self.get_activation_memory_output_embedding(
+            batch_size_per_gpu, seq_len)
+        activation_memory_per_gpu += activation_memory_embedding_output_per_gpu
+        activation_memory_per_gpu += self.get_activation_memory_per_layernorm(
+            batch_size_per_gpu,
+            seq_len,
+            activation_recomputation,
+            layernorm_dtype_bytes,
+        )
 
         logger.info("activation_memory_per_gpu with micro batch size"
                     f" {batch_size_per_gpu}:"
                     f" {_num_to_string(activation_memory_per_gpu)}B")
-        assert memory_left > activation_memory_per_gpu, (
-            "activation memory is too large with batch_size_per_gpu ="
-            f" {batch_size_per_gpu} to fit in GPU memory (requiring"
-            f" {_num_to_string(activation_memory_per_gpu)}B, memory_left after"
-            " fitting in model weights, gradients, and optimizer states ="
-            f" {_num_to_string(memory_left)}B, max_batch_size_per_gpu ="
-            f" {max_batch_size_per_gpu})")
+        if memory_left < activation_memory_per_gpu:
+            logger.warning(
+                "activation memory is too large with batch_size_per_gpu ="
+                f" {batch_size_per_gpu} to fit in GPU memory (requiring"
+                f" {_num_to_string(activation_memory_per_gpu)}B, memory_left after"
+                " fitting in model weights, gradients, and optimizer states ="
+                f" {_num_to_string(memory_left)}B, max_batch_size_per_gpu ="
+                f" {max_batch_size_per_gpu})")
         memory_left -= activation_memory_per_gpu
 
         num_flops_fwd_total = self.get_num_flops_fwd_total(
