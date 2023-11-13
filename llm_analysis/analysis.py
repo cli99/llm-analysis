@@ -95,6 +95,7 @@ class LLMAnalysis:
         hbm_memory_efficiency: float = None,
         intra_node_memory_efficiency: float = INTRA_NODE_MEMORY_EFFICIENCY,
         inter_node_memory_efficiency: float = INTER_NODE_MEMORY_EFFICIENCY,
+        intra_node_alltoall_efficiency: float = INTRA_NODE_ALLTOALL_EFFICIENCY,
     ) -> None:
         """LLMAnalysis constructor.
 
@@ -116,6 +117,7 @@ class LLMAnalysis:
         self.dtype_config = dtype_config
         self.intra_node_memory_efficiency = intra_node_memory_efficiency
         self.inter_node_memory_efficiency = inter_node_memory_efficiency
+        self.intra_node_alltoall_efficiency = intra_node_alltoall_efficiency
 
         if achieved_memory_bandwidth_GBs and hbm_memory_efficiency:
             logger.info(
@@ -1049,6 +1051,13 @@ class LLMAnalysis:
 
         return max(compute_latency, memory_latency)
 
+    def get_latency_fwd_per_layer_mlp_moe_alltoall(self, batch_size: int,
+                                                   seq_len: int) -> float:
+        data_nums = self.model_config.moe_top_k * batch_size * seq_len * self.model_config.hidden_dim
+        data_bytes = data_nums * self.dtype_config.activation_bits / BITS_PER_BYTE
+        return data_bytes / (self.gpu_config.intra_node_bandwidth_in_GB_per_sec
+                             * self.intra_node_alltoall_efficiency * 10**9)
+
     def get_latency_fwd_per_layer_mlp(
         self,
         batch_size: int,
@@ -1089,6 +1098,11 @@ class LLMAnalysis:
 
         memory_latency = weight_memory_latency + activation_memory_latency
 
+        # moe mlp have two alltoall operations
+        alltoall_latency = 2 * self.get_latency_fwd_per_layer_mlp_moe_alltoall(
+            batch_size,
+            seq_len) if self.model_config.moe_num_experts > 1 else 0
+
         logger.debug(
             "latency_fwd_per_layer_mlp:"
             f" {round(max(compute_latency, memory_latency)*1000, 3)} ms"
@@ -1098,7 +1112,7 @@ class LLMAnalysis:
             f" ({round(weight_memory_latency*1000, 3)} +"
             f" {round(activation_memory_latency*1000, 3)})))")
 
-        return max(compute_latency, memory_latency)
+        return max(compute_latency, memory_latency) + alltoall_latency
 
     def get_latency_fwd_per_layer_layernorm(
         self,
@@ -1163,6 +1177,40 @@ class LLMAnalysis:
             self.gpu_config.intra_node_min_message_latency,
         )
 
+    def get_latency_fwd_per_layer_shared_dp_comm(self) -> float:
+        dp_size = self.parallelism_config.dp_size
+        ep_size = self.parallelism_config.ep_size
+
+        def time_allgather(S, n, B):
+            # https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md#allgather
+            return S * (n - 1) / (B * n)
+
+        params_bytes_mlp = self.get_num_params_per_layer_mlp(
+        ) * self.dtype_config.weight_bits / BITS_PER_BYTE
+        params_bytes_non_mlp = (
+            self.get_num_params_per_layer_attn() +
+            self.get_num_params_per_layer_router() +
+            self.get_num_params_per_layer_layernorm()
+        ) * self.dtype_config.weight_bits / BITS_PER_BYTE
+
+        latency_allgather_params_mlp = time_allgather(
+            params_bytes_mlp, dp_size / ep_size,
+            (self.get_intra_node_bandwidth()
+             if ep_size <= 8 else self.get_inter_node_bandwidth()) * 10**9)
+
+        latency_allgather_params_non_mlp = time_allgather(
+            params_bytes_non_mlp, dp_size,
+            (self.get_intra_node_bandwidth()
+             if dp_size <= 8 else self.get_inter_node_bandwidth()) * 10**9)
+
+        latency_fwd_per_layer_shared_dp_comm = latency_allgather_params_mlp + latency_allgather_params_non_mlp
+
+        logger.debug(
+            f'params_bytes_mlp: {_num_to_string(params_bytes_mlp)}B, params_bytes_non_mlp: {_num_to_string(params_bytes_non_mlp)}B,latency_allgather_params_mlp: {round(latency_allgather_params_mlp*1000, 3)} ms, latency_allgather_params_non_mlp: {round(latency_allgather_params_non_mlp*1000, 3)} ms'
+        )
+
+        return latency_fwd_per_layer_shared_dp_comm
+
     def get_latency_fwd_per_layer(
         self,
         batch_size: int,
@@ -1201,6 +1249,9 @@ class LLMAnalysis:
                 activation_recomputation,
                 layernorm_dtype_bytes,
             ))
+        logger.debug(
+            f"latency_fwd_per_layer_layernorm: {round(latency_fwd_per_layer_layernorm*1000, 3)} ms"
+        )
 
         latency_fwd_per_layer_tp_comm = self.get_latency_fwd_per_layer_tp_comm(
             batch_size,
@@ -1208,22 +1259,28 @@ class LLMAnalysis:
             self.dtype_config.activation_bits / BITS_PER_BYTE,
         )
 
+        latency_fwd_per_layer_shared_dp_comm = self.get_latency_fwd_per_layer_shared_dp_comm(
+        )
+        logger.debug(
+            f"latency_fwd_per_layer_tp_comm: {round(latency_fwd_per_layer_tp_comm*1000, 3)} ms"
+        )
+
         latency_per_layer = (latency_fwd_per_layer_attn +
                              latency_fwd_per_layer_mlp +
                              2 * latency_fwd_per_layer_layernorm +
-                             2 * latency_fwd_per_layer_tp_comm)
-
-        logger.debug("latency_fwd_per_layer_layernorm:"
-                     f" {round(latency_fwd_per_layer_layernorm*1000, 3)} ms,"
-                     " latency_fwd_per_layer_tp_comm:"
-                     f" {round(latency_fwd_per_layer_tp_comm*1000, 3)} ms")
+                             2 * latency_fwd_per_layer_tp_comm +
+                             latency_fwd_per_layer_shared_dp_comm)
+        logger.debug(
+            f"latency_fwd_per_layer_shared_dp_comm: {round(latency_fwd_per_layer_shared_dp_comm*1000, 3)} ms"
+        )
 
         logger.debug(
             f"latency_per_layer: {round(latency_per_layer*1000, 3)} ms"
             f" ({round(latency_fwd_per_layer_attn*1000, 3)} +"
             f" {round(latency_fwd_per_layer_mlp*1000, 3)} +"
             f" {round(2*latency_fwd_per_layer_layernorm*1000, 3)} +"
-            f" {round(2*latency_fwd_per_layer_tp_comm*1000, 3)})")
+            f" {round(2*latency_fwd_per_layer_tp_comm*1000, 3)} +"
+            f" {round(latency_fwd_per_layer_shared_dp_comm*1000, 3)})")
 
         breakdown_per_layer = {
             "attn": latency_fwd_per_layer_attn,
