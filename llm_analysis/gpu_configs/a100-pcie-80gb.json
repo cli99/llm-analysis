@@ -7,5 +7,5 @@
     "peak_fp16_TFLOPS": 312,
     "peak_i8_TFLOPS": 624,
     "peak_i4_TFLOPS": 1248,
-    "inter_node_bandwidth_in_GB_per_sec": 600
+    "inter_node_bandwidth_in_GB_per_sec": 200
 }
