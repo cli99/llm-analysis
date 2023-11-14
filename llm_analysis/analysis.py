@@ -1880,9 +1880,10 @@ class LLMAnalysis:
                     ), "no valid batch_size_per_gpu, {assert_msg}"
         elif batch_size_per_gpu and gradient_accumulation_steps or batch_size_per_gpu:
             # batch_size_per_gpu is not None
-            assert (
-                batch_size_per_gpu <= max_batch_size_per_gpu
-            ), f"batch_size_per_gpu {batch_size_per_gpu} must be <= max_batch_size_per_gpu {max_batch_size_per_gpu}, {assert_msg}"
+            if batch_size_per_gpu > max_batch_size_per_gpu:
+                logger.warning(
+                    f"batch_size_per_gpu {batch_size_per_gpu} must be <= max_batch_size_per_gpu {max_batch_size_per_gpu}, {assert_msg}"
+                )
             if gradient_accumulation_steps is None:
                 gradient_accumulation_steps = 1
             global_batch_size = (batch_size_per_gpu *
@@ -2159,7 +2160,7 @@ class LLMAnalysis:
             num_flops_recompute = num_flops_fwd_total
         elif activation_recomputation == ActivationRecomputation.NORM_ATTN_NORM or activation_recomputation == ActivationRecomputation.ATTN:
             num_flops_recompute = self.get_num_flops_fwd_per_layer_attn(
-                batch_size_per_gpu, seq_len)
+                batch_size_per_gpu, seq_len) * self.model_config.num_layers
         elif activation_recomputation == ActivationRecomputation.ATTN_COMPUTE:
             num_flops_recompute = self.get_num_flops_total_attn_compute(
                 batch_size_per_gpu, seq_len)
