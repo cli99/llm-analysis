@@ -2202,7 +2202,8 @@ class LLMAnalysis:
         elif activation_recomputation == ActivationRecomputation.NORM_ATTN_NORM:
             latency_recompute = self.get_latency_fwd_per_layer_attn(
                 batch_size_per_gpu, seq_len, False, activation_recomputation
-            ) + 2 * self.get_latency_fwd_per_layernorm
+            ) + 2 * self.get_latency_fwd_per_layernorm(
+                batch_size_per_gpu, seq_len, layernorm_dtype_bytes)
         elif activation_recomputation == ActivationRecomputation.ATTN:
             latency_recompute = self.get_latency_fwd_per_layer_attn(
                 batch_size_per_gpu, seq_len, False, activation_recomputation)
