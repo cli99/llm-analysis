@@ -170,6 +170,10 @@ class LLMAnalysis:
                 " parallelism")
 
         self.total_num_params = self.get_num_params_total()
+        self.total_num_params_mlp = self.get_num_params_per_layer_mlp(
+        ) * self.model_config.num_layers
+        self.total_num_params_embedding = self.get_num_params_embedding()
+        self.total_num_params_others = self.total_num_params - self.total_num_params_mlp - self.total_num_params_embedding
         self.total_num_active_params = self.get_num_active_params_total()
 
     def update_model_config(self, model_config: ModelConfig) -> None:
@@ -1041,13 +1045,26 @@ class LLMAnalysis:
         logger.debug(
             "latency_fwd_per_layer_attn:"
             f" {round(max(compute_latency, memory_latency)*1000, 3)} ms"
-            " (max(compute_latency, weight_memory_latency+"
-            " activation_memory_latency) ="
+            " (max(compute_latency, weight_memory_latency +"
+            " activation_memory_latency):"
             f" max({round(compute_latency*1000, 3)},"
-            f" ({round(weight_memory_latency*1000, 3)} +"
-            f" {round(activation_memory_latency*1000, 3)})))")
+            f" {round(weight_memory_latency*1000, 3)} +"
+            f" {round(activation_memory_latency*1000, 3)}))")
 
         return max(compute_latency, memory_latency)
+
+    def get_latency_fwd_per_layer_mlp_moe_alltoall(self, batch_size: int,
+                                                   seq_len: int) -> float:
+        data_nums = self.model_config.moe_top_k * batch_size * seq_len * self.model_config.hidden_dim
+        data_bytes = data_nums * self.dtype_config.activation_bits / BITS_PER_BYTE
+
+        latency = data_bytes / (
+            (self.get_intra_node_bandwidth() if self.parallelism_config.ep_size
+             <= 8 else self.get_inter_node_bandwidth()) * 10**9)
+        logger.info(
+            f'moe_alltoall data_bytes = {_num_to_string(data_bytes)}B, latency = {round(latency*1000, 3)} ms'
+        )
+        return latency
 
     def get_latency_fwd_per_layer_mlp(
         self,
@@ -1089,16 +1106,24 @@ class LLMAnalysis:
 
         memory_latency = weight_memory_latency + activation_memory_latency
 
+        # moe mlp have two alltoall operations
+        alltoall_latency = 2 * self.get_latency_fwd_per_layer_mlp_moe_alltoall(
+            batch_size,
+            seq_len) if self.model_config.moe_num_experts > 1 else 0
+
         logger.debug(
             "latency_fwd_per_layer_mlp:"
             f" {round(max(compute_latency, memory_latency)*1000, 3)} ms"
             " (max(compute_latency, weight_memory_latency+"
             " activation_memory_latency) ="
             f" max({round(compute_latency*1000, 3)},"
-            f" ({round(weight_memory_latency*1000, 3)} +"
-            f" {round(activation_memory_latency*1000, 3)})))")
+            f" {round(weight_memory_latency*1000, 3)} +"
+            f" {round(activation_memory_latency*1000, 3)}))")
 
-        return max(compute_latency, memory_latency)
+        logger.debug(
+            f'alltoall_latency = {round(alltoall_latency*1000, 3)} ms')
+
+        return max(compute_latency, memory_latency) + alltoall_latency
 
     def get_latency_fwd_per_layer_layernorm(
         self,
@@ -1163,6 +1188,40 @@ class LLMAnalysis:
             self.gpu_config.intra_node_min_message_latency,
         )
 
+    def get_latency_fwd_per_layer_shared_dp_comm(self) -> float:
+        dp_size = self.parallelism_config.dp_size
+        ep_size = self.parallelism_config.ep_size
+
+        def time_allgather(S, n, B):
+            # https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md#allgather
+            return S * (n - 1) / (B * n)
+
+        params_bytes_mlp = self.get_num_params_per_layer_mlp(
+        ) * self.dtype_config.weight_bits / BITS_PER_BYTE
+        params_bytes_non_mlp = (
+            self.get_num_params_per_layer_attn() +
+            self.get_num_params_per_layer_router() +
+            self.get_num_params_per_layer_layernorm()
+        ) * self.dtype_config.weight_bits / BITS_PER_BYTE
+
+        latency_allgather_params_mlp = time_allgather(
+            params_bytes_mlp, dp_size / ep_size,
+            (self.get_intra_node_bandwidth()
+             if ep_size < 8 else self.get_inter_node_bandwidth()) * 10**9)
+
+        latency_allgather_params_non_mlp = time_allgather(
+            params_bytes_non_mlp, dp_size,
+            (self.get_intra_node_bandwidth()
+             if dp_size <= 8 else self.get_inter_node_bandwidth()) * 10**9)
+
+        latency_fwd_per_layer_shared_dp_comm = latency_allgather_params_mlp + latency_allgather_params_non_mlp
+
+        logger.info(
+            f'params_bytes_mlp: {_num_to_string(params_bytes_mlp)}B, params_bytes_non_mlp: {_num_to_string(params_bytes_non_mlp)}B, latency_allgather_params_mlp: {round(latency_allgather_params_mlp*1000, 3)} ms, latency_allgather_params_non_mlp: {round(latency_allgather_params_non_mlp*1000, 3)} ms'
+        )
+
+        return latency_fwd_per_layer_shared_dp_comm
+
     def get_latency_fwd_per_layer(
         self,
         batch_size: int,
@@ -1171,6 +1230,7 @@ class LLMAnalysis:
         activation_recomputation:
         ActivationRecomputation = ActivationRecomputation.NONE,
         layernorm_dtype_bytes: int = BYTES_FP32,
+        ds_zero: DSZeRO = DSZeRO.NONE,
     ) -> tuple:
         """Get the latency for the forward pass of a transformer layer, given the batch
         size, sequence length, training or inference, activation recomputation strategy,
@@ -1184,10 +1244,14 @@ class LLMAnalysis:
             is_inference (bool, optional): whether it is inference or not. Defaults to True.
             activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Defaults to BYTES_FP32. Often has to be FP32 in training to maintain model accuracy.
+            ds_zero (DSZeRO, optional): which DeepSpeed ZeRO stage to use. Defaults to DSZeRO.NONE (disabled).
 
         Returns:
             tuple: a tuple of the latency in seconds for the forward pass of a transformer layer and its breakdown dict
         """
+        if ds_zero != ds_zero.NONE:
+            assert not is_inference, "DeepSpeed ZeRO is only supported in training"
+
         latency_fwd_per_layer_attn = self.get_latency_fwd_per_layer_attn(
             batch_size, seq_len, is_inference, activation_recomputation)
 
@@ -1201,35 +1265,45 @@ class LLMAnalysis:
                 activation_recomputation,
                 layernorm_dtype_bytes,
             ))
+        logger.debug(
+            f"latency_fwd_per_layer_layernorm: {round(latency_fwd_per_layer_layernorm*1000, 3)} ms"
+        )
 
         latency_fwd_per_layer_tp_comm = self.get_latency_fwd_per_layer_tp_comm(
             batch_size,
             seq_len,
             self.dtype_config.activation_bits / BITS_PER_BYTE,
         )
-
-        latency_per_layer = (latency_fwd_per_layer_attn +
-                             latency_fwd_per_layer_mlp +
-                             2 * latency_fwd_per_layer_layernorm +
-                             2 * latency_fwd_per_layer_tp_comm)
-
-        logger.debug("latency_fwd_per_layer_layernorm:"
-                     f" {round(latency_fwd_per_layer_layernorm*1000, 3)} ms,"
-                     " latency_fwd_per_layer_tp_comm:"
-                     f" {round(latency_fwd_per_layer_tp_comm*1000, 3)} ms")
-
         logger.debug(
-            f"latency_per_layer: {round(latency_per_layer*1000, 3)} ms"
-            f" ({round(latency_fwd_per_layer_attn*1000, 3)} +"
+            f"latency_fwd_per_layer_tp_comm: {round(latency_fwd_per_layer_tp_comm*1000, 3)} ms"
+        )
+
+        latency_fwd_per_layer_shared_dp_comm = self.get_latency_fwd_per_layer_shared_dp_comm(
+        )
+
+        latency_per_layer = latency_fwd_per_layer_attn + latency_fwd_per_layer_mlp + 2 * latency_fwd_per_layer_layernorm + 2 * latency_fwd_per_layer_tp_comm
+
+        if ds_zero > DSZeRO.STAGE_1 and latency_fwd_per_layer_shared_dp_comm > latency_per_layer:
+            logger.warning(
+                f'allgather communication time to unshard model weight {round(latency_fwd_per_layer_shared_dp_comm*1000, 3)} ms is larger than compute {round(latency_per_layer*1000, 3)} ms, thus cannot be fully overlapped.'
+            )
+        latency_per_layer = max(latency_per_layer,
+                                latency_fwd_per_layer_shared_dp_comm)
+
+        logger.info(
+            f"latency_per_layer: {round(latency_per_layer*1000, 3)} ms (max(attn + mlp + 2*layernorm + 2*tp_comm, shared_dp_comm):"
+            f" max({round(latency_fwd_per_layer_attn*1000, 3)} +"
             f" {round(latency_fwd_per_layer_mlp*1000, 3)} +"
             f" {round(2*latency_fwd_per_layer_layernorm*1000, 3)} +"
-            f" {round(2*latency_fwd_per_layer_tp_comm*1000, 3)})")
+            f" {round(2*latency_fwd_per_layer_tp_comm*1000, 3)},"
+            f" {round(latency_fwd_per_layer_shared_dp_comm*1000, 3)}))")
 
         breakdown_per_layer = {
             "attn": latency_fwd_per_layer_attn,
             "mlp": latency_fwd_per_layer_mlp,
             "layernorm": 2 * latency_fwd_per_layer_layernorm,
             "tp_comm": 2 * latency_fwd_per_layer_tp_comm,
+            "sharded_dp_comm": latency_fwd_per_layer_shared_dp_comm
         }
 
         return latency_per_layer, breakdown_per_layer
@@ -1272,6 +1346,7 @@ class LLMAnalysis:
                            self.model_config.vocab_size *
                            self.model_config.hidden_dim /
                            self.parallelism_config.tp_size /
+                           self.parallelism_config.pp_size /
                            (self.get_TFLOPS_per_gpu() * 10**12))
         return compute_latency
 
@@ -1284,6 +1359,7 @@ class LLMAnalysis:
         ActivationRecomputation = ActivationRecomputation.NONE,
         layernorm_dtype_bytes: int = BYTES_FP32,
         breakdown_prefix: str = "",
+        ds_zero: DSZeRO = DSZeRO.NONE,
     ) -> tuple:
         """Get the latency for the forward pass of the transformer, given the batch
         size, sequence length, and whether it is inference or not, the activation
@@ -1297,6 +1373,7 @@ class LLMAnalysis:
             activation_recomputation (ActivationRecomputation, optional): activation recomputation strategy. Defaults to ActivationRecomputation.NONE.
             layernorm_dtype_bytes (int, optional): number of bytes in the data type for the layernorm activations. Defaults to BYTES_FP32. Often has to be FP32 in training to maintain model accuracy.
             breakdown_prefix (str, optional): prefix for the breakdown dict keys. Defaults to "".
+            ds_zero (DSZeRO, optional): which DeepSpeed ZeRO stage to use. Defaults to DSZeRO.NONE (disabled).
         Returns:
             tuple: a tuple of the latency in seconds for the forward pass of the transformer and its breakdown dict
         """
@@ -1312,9 +1389,10 @@ class LLMAnalysis:
             is_inference,
             activation_recomputation,
             layernorm_dtype_bytes,
+            ds_zero,
         )
 
-        latency_fwd_all_layers = latency_fwd_per_layer * num_layers_per_gpu
+        latency_fwd_layers = latency_fwd_per_layer * num_layers_per_gpu
 
         latency_fwd_input_embedding = self.get_latency_fwd_input_embedding(
             batch_size,
@@ -1325,23 +1403,23 @@ class LLMAnalysis:
         latency_fwd_output_embedding_loss = (
             self.get_latency_fwd_output_embedding_loss(batch_size, seq_len))
 
-        total_latency = (latency_fwd_all_layers + latency_fwd_input_embedding +
-                         latency_fwd_output_embedding_loss)
+        latency_fwd = (latency_fwd_layers + latency_fwd_input_embedding +
+                       latency_fwd_output_embedding_loss)
 
-        logger.debug("latency_fwd_all_layers:"
-                     f" {round(latency_fwd_all_layers*1000, 3)} ms"
-                     f" ({round(latency_fwd_per_layer*1000, 3)} ms x"
-                     f" {num_layers_per_gpu}), latency_fwd_input_embedding:"
-                     f" {round(latency_fwd_input_embedding*1000, 3)} ms,"
-                     " latency_fwd_output_embedding_loss:"
-                     f" {round(latency_fwd_output_embedding_loss*1000, 3)} ms")
+        logger.info("latency_fwd_layers:"
+                    f" {round(latency_fwd_layers*1000, 3)} ms"
+                    f" ({round(latency_fwd_per_layer*1000, 3)} ms x"
+                    f" {num_layers_per_gpu}), latency_fwd_input_embedding:"
+                    f" {round(latency_fwd_input_embedding*1000, 3)} ms,"
+                    " latency_fwd_output_embedding_loss:"
+                    f" {round(latency_fwd_output_embedding_loss*1000, 3)} ms")
 
-        logger.debug(f"latency_fwd_total: {round(total_latency*1000, 3)} ms"
-                     f" ({round(latency_fwd_all_layers*1000, 3)} +"
-                     f" {round(latency_fwd_input_embedding*1000, 3)} +"
-                     f" {round(latency_fwd_output_embedding_loss*1000, 3)})")
+        logger.info(
+            f"latency_fwd: {round(latency_fwd*1000, 3)} ms (layers + input_embedding + output_embedding_loss: "
+            f"{round(latency_fwd_layers*1000, 3)} + {round(latency_fwd_input_embedding*1000, 3)} + {round(latency_fwd_output_embedding_loss*1000, 3)})"
+        )
 
-        total_breakdown = {
+        latency_fwd_breakdown = {
             breakdown_prefix + "latency_fwd_attn":
             breakdown_per_layer["attn"] * num_layers_per_gpu,
             breakdown_prefix + "latency_fwd_mlp":
@@ -1350,12 +1428,18 @@ class LLMAnalysis:
             breakdown_per_layer["layernorm"] * num_layers_per_gpu,
             breakdown_prefix + "latency_fwd_tp_comm":
             breakdown_per_layer["tp_comm"] * num_layers_per_gpu,
+            breakdown_prefix + "latency_fwd_sharded_dp_comm":
+            breakdown_per_layer["sharded_dp_comm"] * num_layers_per_gpu,
             breakdown_prefix + "latency_fwd_input_embedding":
             latency_fwd_input_embedding,
             breakdown_prefix + "latency_fwd_output_embedding_loss":
             latency_fwd_output_embedding_loss,
         }
-        return total_latency, total_breakdown
+        return latency_fwd, latency_fwd_breakdown
+
+    def get_latency_weight_update(self, ):
+        return self.weight_grad_op_state_memory_per_gpu / (
+            self.get_gpu_hbm_bandwidth() * 10**9)
 
     def print_config(self, name="Training Configs") -> None:
         config_str = f"\n{name.center(PRINT_LINE_WIDTH, '-')}\n"
@@ -1928,9 +2012,10 @@ class LLMAnalysis:
         optimizer_state_memory_per_gpu = optimizer_state_memory_per_layer * num_layers_per_gpu + optimizer_state_memory_embedding + optimizer_state_memory_last_layernorm
         gradient_memory_per_gpu = gradient_memory_per_layer * num_layers_per_gpu + gradient_memory_embedding + gradient_memory_last_layernorm
 
+        self.weight_grad_op_state_memory_per_gpu = weight_memory_per_gpu + gradient_memory_per_gpu + optimizer_state_memory_per_gpu
+
         memory_left = (self.gpu_config.mem_per_GPU_in_GB * 1024**3 -
-                       weight_memory_per_gpu - optimizer_state_memory_per_gpu -
-                       gradient_memory_per_gpu)
+                       self.weight_grad_op_state_memory_per_gpu)
 
         logger.info(
             f"weight_memory_per_gpu: {_num_to_string(weight_memory_per_gpu)}B"
@@ -2085,24 +2170,32 @@ class LLMAnalysis:
             is_inference=False,
             activation_recomputation=activation_recomputation,
             layernorm_dtype_bytes=layernorm_dtype_bytes,
+            ds_zero=ds_zero,
         )
+        # estimated by flops only:
+        latency_per_micro_batch_using_flops = num_flops_total_per_micro_batch / (
+            (self.parallelism_config.tp_size * self.parallelism_config.pp_size)
+            * self.get_TFLOPS_per_gpu() * 1e12)
+        logger.info(
+            f'latency_per_micro_batch_using_flops = {round(latency_per_micro_batch_using_flops*1000, 3)} ms'
+        )
+        latency_per_micro_batch = latency_fwd * 3 + num_flops_recompute / (
+            (self.parallelism_config.tp_size * self.parallelism_config.pp_size)
+            * self.get_TFLOPS_per_gpu() * 1e12)
 
-        mp_size = (self.parallelism_config.tp_size *
-                   self.parallelism_config.pp_size)
+        latency_weight_update = self.get_latency_weight_update()
 
-        latency_per_micro_batch = num_flops_total_per_micro_batch / (
-            mp_size * self.get_TFLOPS_per_gpu() * 1e12)
+        latency_per_iter = (
+            latency_per_micro_batch * gradient_accumulation_steps +
+            latency_weight_update)
 
-        latency_per_iter = (latency_per_micro_batch *
-                            gradient_accumulation_steps)
+        latency_per_iter_using_flops = latency_per_micro_batch_using_flops * gradient_accumulation_steps
 
         logger.info(
-            "latency_per_micro_batch:"
-            f" {round(latency_per_micro_batch * 1000, 3)} ms, latency_fwd:"
-            f" {round(latency_fwd * 1000, 3)} ms, \nlatency_per_iter:"
-            f" {round(latency_per_iter * 1000, 3)} ms"
-            f" ({round(latency_per_micro_batch * 1000, 3)} ms *"
-            f" {gradient_accumulation_steps} gradient_accumulation_steps)")
+            f"latency_per_micro_batch: {round(latency_per_micro_batch * 1000, 3)} ms, "
+            f"latency_per_iter: {round(latency_per_iter * 1000, 3)} ms "
+            f"({round(latency_per_micro_batch * 1000, 3)} ms latency_fwd * {gradient_accumulation_steps} gradient_accumulation_steps + {round(latency_weight_update * 1000, 3)} ms weight_update)"
+        )
 
         total_num_gpus = (self.parallelism_config.tp_size *
                           self.parallelism_config.pp_size *
@@ -2119,6 +2212,7 @@ class LLMAnalysis:
                     f" {round(total_num_tokens/self.total_num_params, 3)} ")
             num_iters = int(total_num_tokens / (global_batch_size * seq_len))
             total_training_latency = latency_per_iter * num_iters
+            total_training_latency_using_flops = latency_per_iter_using_flops * num_iters
             logger.info(
                 f"total_training_latency: {round(total_training_latency, 3)} s"
                 f" = {round(total_training_latency/3600/24, 3)} days"
@@ -2131,10 +2225,10 @@ class LLMAnalysis:
                      == ActivationRecomputation.FULL else 6) *
                     self.total_num_params * total_num_tokens /
                     (total_num_gpus * self.get_TFLOPS_per_gpu() * 1e12))
-                if not within_range(total_training_latency,
+                if not within_range(total_training_latency_using_flops,
                                     estimated_total_training_latency, 0.05):
                     logger.warning(
-                        f"total_training_latency ({total_training_latency}) is too"
+                        f"total_training_latency_using_flops ({total_training_latency_using_flops}) is too"
                         " different from estimated_total_training_latency"
                         f" ({estimated_total_training_latency})")
 
@@ -2173,6 +2267,12 @@ class LLMAnalysis:
             total_num_tokens,
             "num_params_total":
             self.total_num_params,
+            "num_params_total_mlp":
+            self.total_num_params_mlp,
+            "num_params_total_embedding":
+            self.total_num_params_embedding,
+            "num_params_total_others":
+            self.total_num_params_others,
             "num_active_params_total":
             self.total_num_active_params,
             "activation_recomputation":
@@ -2206,8 +2306,7 @@ class LLMAnalysis:
             "optimizer_state_memory_per_gpu":
             optimizer_state_memory_per_gpu,
             "(weight+op_state+grad)_memory_per_gpu":
-            weight_memory_per_gpu + gradient_memory_per_gpu +
-            optimizer_state_memory_per_gpu,
+            self.weight_grad_op_state_memory_per_gpu,
             "activation_memory_batch_size_1":
             activation_memory_batch_size_1,
             "activation_memory_per_gpu":
@@ -2221,8 +2320,8 @@ class LLMAnalysis:
             "activation_memory_embedding_output_per_gpu":
             activation_memory_embedding_output_per_gpu,
             "(weight+op_state+grad+act)_memory_per_gpu":
-            weight_memory_per_gpu + gradient_memory_per_gpu +
-            optimizer_state_memory_per_gpu + activation_memory_per_gpu,
+            self.weight_grad_op_state_memory_per_gpu +
+            activation_memory_per_gpu,
             "memory_left_per_gpu":
             memory_left,
             "latency_per_micro_batch":
@@ -2233,7 +2332,11 @@ class LLMAnalysis:
         summary_dict.update(latency_fwd_breakdown)
         summary_dict.update({
             "latency_per_iter": latency_per_iter,
+            "iters_per_sec": round(1 / latency_per_iter, 2),
             "total_training_latency": total_training_latency,
+            "latency_per_iter_using_flops": latency_per_iter_using_flops,
+            "total_training_latency_using_flops":
+            total_training_latency_using_flops,
             "gpu_hours": gpu_hours,
         })
 
@@ -2444,7 +2547,7 @@ def train(
     if total_num_gpus and dp_size:
         assert (
             total_num_gpus == dp_size * tp_size * pp_size
-        ), "total_num_gpus must be equal to dp_size * tp_size * pp_size"
+        ), f"total_num_gpus {total_num_gpus} must be equal to dp_size * tp_size * pp_size {dp_size * tp_size * pp_size}"
     elif total_num_gpus:
         assert (total_num_gpus % (tp_size * pp_size) == 0
                 ), f"total_num_gpus must be a multiple of tp_size * pp_size"

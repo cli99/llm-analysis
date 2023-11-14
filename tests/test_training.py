@@ -61,11 +61,12 @@ def test_training_megatron_lm_1():
         activation_recomputation=activation_recomputation,
     )
 
-    assert within_range(summary_dict["total_training_latency"] / 3600 / 24, 84,
-                        TOLERANCE)
+    assert within_range(
+        summary_dict["total_training_latency_using_flops"] / 3600 / 24, 84,
+        TOLERANCE)
 
     assert (_latency_to_string(
-        summary_dict["total_training_latency"]) == "84.82 days")
+        summary_dict["total_training_latency_using_flops"]) == "84.82 days")
 
     assert _num_to_string(summary_dict["num_params_total"]) == "162.58 G"
 
@@ -107,8 +108,9 @@ def test_training_megatron_lm_2():
         activation_recomputation=activation_recomputation,
     )
 
-    assert within_range(summary_dict["total_training_latency"] / 3600 / 24, 23,
-                        TOLERANCE)
+    assert within_range(
+        summary_dict["total_training_latency_using_flops"] / 3600 / 24, 23,
+        TOLERANCE)
 
 
 # megatron-lm paper https://arxiv.org/abs/2104.04473 Table 2
@@ -149,8 +151,9 @@ def test_training_megatron_lm_3():
             activation_recomputation),
     )
 
-    assert within_range(summary_dict["total_training_latency"] / 3600 / 24,
-                        156, TOLERANCE)
+    assert within_range(
+        summary_dict["total_training_latency_using_flops"] / 3600 / 24, 156,
+        TOLERANCE)
 
 
 # megatron-lm paper https://arxiv.org/abs/2104.04473 Table 2
@@ -192,8 +195,9 @@ def test_training_zero3_1():
         ds_zero=DSZeRO.STAGE_3,
     )
 
-    assert within_range(summary_dict["total_training_latency"] / 3600 / 24, 90,
-                        TOLERANCE)
+    assert within_range(
+        summary_dict["total_training_latency_using_flops"] / 3600 / 24, 90,
+        TOLERANCE)
 
 
 # megatron-lm paper https://arxiv.org/abs/2104.04473 Table 2
@@ -234,8 +238,9 @@ def test_training_zero3_2():
         ds_zero=DSZeRO.STAGE_3,
     )
 
-    assert within_range(summary_dict["total_training_latency"] / 3600 / 24,
-                        136, TOLERANCE)
+    assert within_range(
+        summary_dict["total_training_latency_using_flops"] / 3600 / 24, 136,
+        TOLERANCE)
 
 
 # deepspeed megatron mt-nlg-530b paper https://arxiv.org/abs/2201.11990
@@ -315,8 +320,10 @@ def test_training_mt_nlg_2():
         total_num_tokens=total_num_tokens,
         activation_recomputation=activation_recomputation,
         ds_zero=DSZeRO.STAGE_3,
-    )
+        flash_attn=False)
 
-    assert within_range(summary_dict["latency_per_iter"], 49.98, TOLERANCE)
+    assert within_range(summary_dict["latency_per_iter_using_flops"], 50.2,
+                        TOLERANCE)
 
-    assert _latency_to_string(summary_dict["latency_per_iter"]) == "49.98 s"
+    assert _latency_to_string(
+        summary_dict["latency_per_iter_using_flops"]) == "49.98 s"
