@@ -281,7 +281,8 @@ def test_training_mt_nlg_1():
         ds_zero=DSZeRO.STAGE_3,
     )
 
-    assert within_range(summary_dict["latency_per_iter"], 60.0, TOLERANCE)
+    assert within_range(summary_dict["latency_per_iter_using_flops"], 60.0,
+                        TOLERANCE)
 
 
 # deepspeed megatron mt-nlg-530b paper https://arxiv.org/abs/2201.11990

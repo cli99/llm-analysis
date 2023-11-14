@@ -14,18 +14,23 @@
 
 
 def _num_to_string(num, precision=2, divisor=1024):
+    if num < 0:
+        sign = '-'
+        num = -num
+    else:
+        sign = ''
     if num is None:
         return "None"
     if num // divisor**4 > 0:
-        return str(round(num / divisor**4, precision)) + " T"
+        return sign + str(round(num / divisor**4, precision)) + " T"
     elif num // divisor**3 > 0:
-        return str(round(num / divisor**3, precision)) + " G"
+        return sign + str(round(num / divisor**3, precision)) + " G"
     elif num // divisor**2 > 0:
-        return str(round(num / divisor**2, precision)) + " M"
+        return sign + str(round(num / divisor**2, precision)) + " M"
     elif num // divisor > 0:
-        return str(round(num / divisor, precision)) + " K"
+        return sign + str(round(num / divisor, precision)) + " K"
     else:
-        return str(num)
+        return sign + str(num)
 
 
 def _latency_to_string(latency_in_s, precision=2):
