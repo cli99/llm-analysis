@@ -1467,14 +1467,14 @@ class LLMAnalysis:
                                   title="Summary") -> str:
         log_str = f"\n{title.center(PRINT_LINE_WIDTH, '-')}\n"
         for key, value in summary_dict.items():
-            if "num_tokens" in key or "num_params" in key or "num_active_params" in key or "flops" in key:
+            if "latency" in key:
+                log_str += f"{key}: {_latency_to_string(value)}\n"
+            elif "num_tokens" in key or "num_params" in key or "num_active_params" in key or "flops" in key:
                 log_str += f"{key}: {_num_to_string(value, divisor=1000)}\n"
             elif "gpu_hours" == key:
                 log_str += f"{key}: {int(value)}\n" if value else ""
             elif "memory" in key and "efficiency" not in key:
                 log_str += f"{key}: {_num_to_string(value)}B\n"
-            elif "latency" in key:
-                log_str += f"{key}: {_latency_to_string(value)}\n"
             else:
                 log_str += f"{key}: {value}\n"
         log_str += f"{'-' * PRINT_LINE_WIDTH}\n"
