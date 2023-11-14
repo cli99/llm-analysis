@@ -1058,7 +1058,9 @@ class LLMAnalysis:
         data_nums = self.model_config.moe_top_k * batch_size * seq_len * self.model_config.hidden_dim
         data_bytes = data_nums * self.dtype_config.activation_bits / BITS_PER_BYTE
 
-        latency = data_bytes / (self.get_intra_node_bandwidth() * 10**9)
+        latency = data_bytes / (
+            (self.get_intra_node_bandwidth() if self.parallelism_config.ep_size
+             <= 8 else self.get_inter_node_bandwidth()) * 10**9)
         logger.info(
             f'moe_alltoall data_bytes = {_num_to_string(data_bytes)}B, latency = {round(latency*1000, 3)} ms'
         )
@@ -1344,6 +1346,7 @@ class LLMAnalysis:
                            self.model_config.vocab_size *
                            self.model_config.hidden_dim /
                            self.parallelism_config.tp_size /
+                           self.parallelism_config.pp_size /
                            (self.get_TFLOPS_per_gpu() * 10**12))
         return compute_latency
 
@@ -2170,15 +2173,23 @@ class LLMAnalysis:
             ds_zero=ds_zero,
         )
         # estimated by flops only:
-        # latency_per_micro_batch = num_flops_total_per_micro_batch / (
-        #     (self.parallelism_config.tp_size * self.parallelism_config.pp_size)
-        #     * self.get_TFLOPS_per_gpu() * 1e12)
-        latency_per_micro_batch = latency_fwd * 3
+        latency_per_micro_batch_using_flops = num_flops_total_per_micro_batch / (
+            (self.parallelism_config.tp_size * self.parallelism_config.pp_size)
+            * self.get_TFLOPS_per_gpu() * 1e12)
+        logger.info(
+            f'latency_per_micro_batch_using_flops = {round(latency_per_micro_batch_using_flops*1000, 3)} ms'
+        )
+        latency_per_micro_batch = latency_fwd * 3 + num_flops_recompute / (
+            (self.parallelism_config.tp_size * self.parallelism_config.pp_size)
+            * self.get_TFLOPS_per_gpu() * 1e12)
+
         latency_weight_update = self.get_latency_weight_update()
 
         latency_per_iter = (
             latency_per_micro_batch * gradient_accumulation_steps +
             latency_weight_update)
+
+        latency_per_iter_using_flops = latency_per_micro_batch_using_flops * gradient_accumulation_steps
 
         logger.info(
             f"latency_per_micro_batch: {round(latency_per_micro_batch * 1000, 3)} ms, "
@@ -2201,6 +2212,7 @@ class LLMAnalysis:
                     f" {round(total_num_tokens/self.total_num_params, 3)} ")
             num_iters = int(total_num_tokens / (global_batch_size * seq_len))
             total_training_latency = latency_per_iter * num_iters
+            total_training_latency_using_flops = latency_per_iter_using_flops * num_iters
             logger.info(
                 f"total_training_latency: {round(total_training_latency, 3)} s"
                 f" = {round(total_training_latency/3600/24, 3)} days"
@@ -2213,10 +2225,10 @@ class LLMAnalysis:
                      == ActivationRecomputation.FULL else 6) *
                     self.total_num_params * total_num_tokens /
                     (total_num_gpus * self.get_TFLOPS_per_gpu() * 1e12))
-                if not within_range(total_training_latency,
+                if not within_range(total_training_latency_using_flops,
                                     estimated_total_training_latency, 0.05):
                     logger.warning(
-                        f"total_training_latency ({total_training_latency}) is too"
+                        f"total_training_latency_using_flops ({total_training_latency_using_flops}) is too"
                         " different from estimated_total_training_latency"
                         f" ({estimated_total_training_latency})")
 
@@ -2322,6 +2334,9 @@ class LLMAnalysis:
             "latency_per_iter": latency_per_iter,
             "iters_per_sec": round(1 / latency_per_iter, 2),
             "total_training_latency": total_training_latency,
+            "latency_per_iter_using_flops": latency_per_iter_using_flops,
+            "total_training_latency_using_flops":
+            total_training_latency_using_flops,
             "gpu_hours": gpu_hours,
         })
 
@@ -2532,7 +2547,7 @@ def train(
     if total_num_gpus and dp_size:
         assert (
             total_num_gpus == dp_size * tp_size * pp_size
-        ), "total_num_gpus must be equal to dp_size * tp_size * pp_size"
+        ), f"total_num_gpus {total_num_gpus} must be equal to dp_size * tp_size * pp_size {dp_size * tp_size * pp_size}"
     elif total_num_gpus:
         assert (total_num_gpus % (tp_size * pp_size) == 0
                 ), f"total_num_gpus must be a multiple of tp_size * pp_size"
@@ -2541,8 +2556,6 @@ def train(
         total_num_gpus = dp_size * tp_size * pp_size
     else:
         dp_size = 1
-
-    assert ep_size <= 8, "only support ep_size up to 8 GPUs per node"
 
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
