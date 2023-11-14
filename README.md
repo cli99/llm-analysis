@@ -144,10 +144,22 @@ llm-analysis currently covers Tensor Parallelism (tp), Pipeline Parallelism (pp)
 - ep parallelizes the number of MLP experts across `ep_size` devices, i.e. the number of experts per GPU is `total number of experts / ep_size`. Thus for the MLP module, the number of devices for other parallelization dimensions is divided by `ep_size` compared to other parts of the model.
 
 ### Communication
-tp communication is calculated as using `ring allreduce`. pp, dp, ep communications are ignored for now, i.e. assuming perfect computation and communication overlapping, which is not true when communication cannot overlap with compute due to dependency, or when communication is too long to hide due to slow interconnect or large data volume.
+tp communication is calculated as using `ring allreduce`. ep communication is calculated as using `alltoall`.
+dp communication time to unshard model weight when using FSDP or DeepSpeed ZeRO is estimated and compared against the compute latency, the larger value of the two is used for the overall latency.
+Other dp and pp communications are ignored for now, i.e. assuming perfect computation and communication overlapping, which is not true when communication cannot overlap with compute due to dependency, or when communication is too long to hide due to slow interconnect or large data volume.
 
 ### Activation Recomputation
-llm-analysis supports both full and selective activation recomputation, as described in [Reducing Activation Recomputation in Large Transformer Models](https://arxiv.org/abs/2205.05198)
+llm-analysis supports both full and selective activation recomputation.
+
+| activation_recomputation | what is checkpointed and recomputed                                                                                                                                                                                                                                               |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0                        | No activation recomputation; requires the most amount of memory                                                                                                                                                                                                                   |
+| 1                        | Checkpoints the attention computation (QK^T matrix multiply, softmax, softmax dropout, and attention over V.) in the attention module of a transformer layer;  as described in [Reducing Activation Recomputation in Large Transformer Models](https://arxiv.org/abs/2205.05198). |
+| 2                        | Checkpoints the input to the attention module in a transformer layer; requires an extra forward pass on attention.                                                                                                                                                                |
+| 3                        | Checkpoints the input to the sequence of modules (layernom-attention-layernom) in a transformer layer; requires an extra forward pass on (layernom-attention-layernom).                                                                                                           |
+| 4                        | Full activation recomputation stores the input to the transformer layer; requires the least amount of memory; requires an extra forward pass of the entire layer.                                                                                                                 |
+
+
 
 ### Data Types
 Data types are expressed with the number of bits, only `32` (FP32, TF32), `16` (FP16, BF16), `8` (INT8), and `4` (INT4) bits data types are modeled for now.
