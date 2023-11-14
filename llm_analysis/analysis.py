@@ -846,26 +846,20 @@ class LLMAnalysis:
                 f" {_num_to_string(2*activation_memory_per_layernorm)}B))")
         else:
             if activation_recomputation == ActivationRecomputation.NORM_ATTN_NORM:
-                activation_memory_per_layer = activation_memory_per_layer_attn + activation_memory_per_layer_mlp + activation_memory_per_layernorm
-                logger.info(
-                    f"activation_memory_per_layer for micro batch size {batch_size} with activation_recomputation {activation_recomputation}:"
-                    f" {_num_to_string(activation_memory_per_layer)}B"
-                    f" (attn + mlp + layernorm: {_num_to_string(activation_memory_per_layer_attn)}B +"
-                    f" {_num_to_string(activation_memory_per_layer_mlp)}B +"
-                    f" {_num_to_string(activation_memory_per_layernorm)}B)")
+                activation_memory_layernorm = activation_memory_per_layernorm
             else:
-                activation_memory_per_layer = (
-                    activation_memory_per_layer_attn +
-                    activation_memory_per_layer_mlp +
-                    2 * activation_memory_per_layernorm)
+                activation_memory_layernorm = 2 * activation_memory_per_layernorm
+            activation_memory_per_layer = (activation_memory_per_layer_attn +
+                                           activation_memory_per_layer_mlp +
+                                           activation_memory_layernorm)
             logger.info(
                 f"activation_memory_per_layer for micro batch size {batch_size} with activation_recomputation {activation_recomputation}:"
                 f" {_num_to_string(activation_memory_per_layer)}B"
                 f" (attn + mlp + layernorm: {_num_to_string(activation_memory_per_layer_attn)}B +"
-                f" {_num_to_string(activation_memory_per_layer_mlp)}B + 2 *"
-                f" {_num_to_string(activation_memory_per_layernorm)}B)")
+                f" {_num_to_string(activation_memory_per_layer_mlp)}B + "
+                f" {_num_to_string(activation_memory_layernorm)}B)")
         if return_breakdown:
-            return activation_memory_per_layer, activation_memory_per_layer_attn, activation_memory_per_layer_mlp, 2 * activation_memory_per_layernorm
+            return activation_memory_per_layer, activation_memory_per_layer_attn, activation_memory_per_layer_mlp, activation_memory_layernorm
         return activation_memory_per_layer
 
     def get_memory_kv_cache_per_layer(
