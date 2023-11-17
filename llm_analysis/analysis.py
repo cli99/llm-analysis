@@ -1210,7 +1210,7 @@ class LLMAnalysis:
             return S * (n - 1) / (B * n)
 
         params_bytes_mlp = self.get_num_params_per_layer_mlp(
-        ) * dp_size / ep_size / ep_size * self.dtype_config.weight_bits / BITS_PER_BYTE
+        ) / ep_size * self.dtype_config.weight_bits / BITS_PER_BYTE
         params_bytes_non_mlp = (
             self.get_num_params_per_layer_attn() +
             self.get_num_params_per_layer_router() +
