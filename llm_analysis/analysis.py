@@ -930,7 +930,7 @@ class LLMAnalysis:
         Returns:
             int: the number of floating point operations for the forward pass of the MLP module in a transformer layer
         """
-        return 16 * batch_size * seq_len * self.model_config.hidden_dim**2
+        return 4 * batch_size * seq_len * self.model_config.hidden_dim**2 * self.model_config.expansion_ratio
 
     def get_num_flops_fwd_per_layer(
         self,
