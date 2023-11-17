@@ -1110,7 +1110,8 @@ class LLMAnalysis:
             self.get_num_flops_fwd_per_layer_mlp(batch_size, seq_len) /
             tp_size / (self.get_TFLOPS_per_gpu() * 10**12))
 
-        weight_memory = (self.get_num_params_per_layer_mlp() *
+        weight_memory = (self.get_num_params_per_layer_mlp() /
+                         self.parallelism_config.ep_size *
                          self.dtype_config.weight_bits / BITS_PER_BYTE)
         weight_memory_latency = (weight_memory / tp_size /
                                  (self.get_gpu_hbm_bandwidth() * 10**9))
@@ -1209,7 +1210,7 @@ class LLMAnalysis:
             return S * (n - 1) / (B * n)
 
         params_bytes_mlp = self.get_num_params_per_layer_mlp(
-        ) * self.dtype_config.weight_bits / BITS_PER_BYTE
+        ) * dp_size / ep_size / ep_size * self.dtype_config.weight_bits / BITS_PER_BYTE
         params_bytes_non_mlp = (
             self.get_num_params_per_layer_attn() +
             self.get_num_params_per_layer_router() +
@@ -1219,7 +1220,7 @@ class LLMAnalysis:
         latency_allgather_params_mlp = time_allgather(
             params_bytes_mlp, dp_size / ep_size,
             (self.get_intra_node_bandwidth()
-             if ep_size < 8 else self.get_inter_node_bandwidth()) * 10**9)
+             if dp_size <= 8 else self.get_inter_node_bandwidth()) * 10**9)
 
         latency_allgather_params_non_mlp = time_allgather(
             params_bytes_non_mlp, dp_size,
