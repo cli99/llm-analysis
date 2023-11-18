@@ -698,19 +698,28 @@ class LLMAnalysis:
                 bytes_per_gelu_input * self.model_config.expansion_ratio
             ) * seq_len * batch_size * hidden_dim * self.model_config.moe_top_k / tp_size
 
-        activation_memory_per_layer_mlp = bytes_per_1linear_input * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / sp_size
+        if self.model_config.moe_num_experts > 1:
+            # MoE MLP
+            # The router stores inputs batch size * seq len * feature dim
+            # The softmax stores inputs batch size * seq len * feature dim
+            # W1 stores on average TopK * batch size * seq len * feature dim
+            activation_memory_per_layer_mlp = 2 * bytes_per_activation * seq_len * batch_size * hidden_dim / sp_size
+            activation_memory_per_layer_mlp += bytes_per_1linear_input * seq_len * batch_size * hidden_dim * self.model_config.moe_top_k / sp_size
+        else:
+            # dense MLP
+            activation_memory_per_layer_mlp = bytes_per_activation * seq_len * batch_size * hidden_dim / sp_size
 
         if recompute_gelu and gated_linear_units:
             # swiglu decreases the expansion ratio by 2/3 to get isoparam
             activation_memory_per_layer_mlp += (
                 1 / 3 * bytes_per_gelu_input
-            ) * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / tp_size
+            ) * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * self.model_config.moe_top_k / tp_size
         elif recompute_gelu:
-            activation_memory_per_layer_mlp += bytes_per_gelu_input * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / tp_size
+            activation_memory_per_layer_mlp += bytes_per_gelu_input * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * self.model_config.moe_top_k / tp_size
         else:
             activation_memory_per_layer_mlp += (
                 bytes_per_gelu_input + bytes_per_2linear_input
-            ) * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * num_experts_per_gpu * self.model_config.moe_top_k / tp_size
+            ) * self.model_config.expansion_ratio * seq_len * batch_size * hidden_dim * self.model_config.moe_top_k / tp_size
 
         # dropout mask only requires a single byte per element
         if with_dropout:
