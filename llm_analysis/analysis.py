@@ -292,7 +292,7 @@ class LLMAnalysis:
         Returns:
             int: the number of parameters in the two MLP linear layers
         """
-        return 2 * self.model_config.hidden_dim * self.model_config.ffn_embed_dim * self.model_config.moe_num_experts
+        return (3 if self.model_config.mlp_gated_linear_units else 2) * self.model_config.hidden_dim * self.model_config.ffn_embed_dim * self.model_config.moe_num_experts
 
     def get_num_params_per_layer_router(self) -> int:
         if self.model_config.moe_num_experts > 1:
@@ -775,7 +775,6 @@ class LLMAnalysis:
         mlp_gelu_input_quant_bits: int = None,
         mlp_2linear_quant_bits: int = None,
         mlp_recompute_gelu: bool = False,
-        mlp_gated_linear_units: bool = False,
         return_breakdown: bool = False,
     ) -> Union[float, tuple]:
         """Get the memory (in bytes) required to store the activations of a
@@ -798,7 +797,6 @@ class LLMAnalysis:
             mlp_1linear_quant_bits (int, optional): number of bits to quantize the input activations of the first linear layer. Defaults to None.
             mlp_gelu_input_quant_bits (int, optional): number of bits to quantize the GELU input activations. Defaults to None.
             mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.            mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
-            mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
         Returns:
             Union[float, tuple]: the memory (in bytes) required to store the activations of a transformer layer or a tuple of its breakdown
         """
@@ -839,7 +837,7 @@ class LLMAnalysis:
                 mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
                 mlp_2linear_quant_bits=mlp_2linear_quant_bits,
                 recompute_gelu=mlp_recompute_gelu,
-                gated_linear_units=mlp_gated_linear_units,
+                gated_linear_units=self.model_config.mlp_gated_linear_units,
             ))
 
         activation_memory_per_layernorm = self.get_activation_memory_per_layernorm(
@@ -1521,6 +1519,7 @@ class LLMAnalysis:
             log_str = self.get_readable_summary_dict(summary_dict)
             file_name = self.get_configs_desc(
             ) + output_file_suffix + "-summary-readable.txt"
+            file_name = output_file_suffix + "-summary-readable.txt"
             with open(os.path.join(output_dir, file_name), "w") as f:
                 f.write(log_str)
             logger.info(
@@ -1957,7 +1956,6 @@ class LLMAnalysis:
         mlp_gelu_input_quant_bits: int = None,
         mlp_2linear_quant_bits: int = None,
         mlp_recompute_gelu: bool = False,
-        mlp_gated_linear_units: bool = False,
         output_dir: str = None,
         output_file_suffix: str = "",
     ) -> dict:
@@ -1981,7 +1979,6 @@ class LLMAnalysis:
             mlp_gelu_input_quant_bits (int, optional): number of bits to quantize the GELU input activations. Defaults to None.
             mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.
             mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
-            mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
             output_dir (str, optional): if set to a directory path, write the return summary dict out to the directory with the setup. Defaults to None.
 
         Returns:
@@ -2078,7 +2075,6 @@ class LLMAnalysis:
                 mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
                 mlp_2linear_quant_bits=mlp_2linear_quant_bits,
                 mlp_recompute_gelu=mlp_recompute_gelu,
-                mlp_gated_linear_units=mlp_gated_linear_units,
                 return_breakdown=True,
             )
         ]
@@ -2326,6 +2322,8 @@ class LLMAnalysis:
             mlp_activation_quant_bits,
             "mlp_recompute_gelu":
             mlp_recompute_gelu,
+            "mlp_gated_linear_units":
+            self.model_config.mlp_gated_linear_units,
             "achieved_flops":
             self.get_TFLOPS_per_gpu(),
             "flops_efficiency":
@@ -2525,7 +2523,6 @@ def train(
     mlp_gelu_input_quant_bits: int = None,
     mlp_2linear_quant_bits: int = None,
     mlp_recompute_gelu: bool = False,
-    mlp_gated_linear_units: bool = False,
     achieved_tflops: float = None,
     flops_efficiency: float = None,
     hbm_memory_efficiency: float = HBM_MEMORY_EFFICIENCY,
@@ -2568,7 +2565,6 @@ def train(
         mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.
         mlp_activation_quant_bits (int, optional): number of bits for the quantized MLP activation. Defaults to None.
         mlp_recompute_gelu (bool, optional): whether to recompute the GELU activation in the MLP backward pass. Defaults to False.
-        mlp_gated_linear_units (bool, optional): whether to use gated linear units in the MLP. Defaults to False.
         achieved_tflops (float, optional): achieved TFLOPS per GPU. Defaults to None.
         flops_efficiency (float, optional): flops efficiency, ranging from 0 to 1. Defaults to None.
         hbm_memory_efficiency (float, optional): GPU HBM memory efficiency, ranging from 0 to 1. Defaults to HBM_MEMORY_EFFICIENCY.
@@ -2603,6 +2599,8 @@ def train(
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
+    # if model_config.moe_num_experts == 1:
+    # ep_size = 1
     parallel_config = ParallelismConfig(
         tp_size=tp_size,
         pp_size=pp_size,
@@ -2641,7 +2639,6 @@ def train(
         mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
         mlp_2linear_quant_bits=mlp_2linear_quant_bits,
         mlp_recompute_gelu=mlp_recompute_gelu,
-        mlp_gated_linear_units=mlp_gated_linear_units,
         output_dir=output_dir,
         output_file_suffix=output_file_suffix,
     )

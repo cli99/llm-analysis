@@ -58,12 +58,13 @@ class ModelConfig:
     ffn_embed_dim: int = (
         None  # hidden dimension of FFN, default to 4 * hidden_dim
     )
-    expansion_ratio: int = None
+    expansion_ratio: float = None
     model_type: str = (
         None  # model type as tagged on Hugging Face (e.g., gpt2, opt, llama.)
     )
     moe_num_experts: int = 1  # number of experts for mixture of experts model
     moe_top_k: int = 1  # top k experts for mixture of experts model
+    mlp_gated_linear_units: bool = False  # whether to use gated linear units for MLP
 
     def __post_init__(self):
         if self.ffn_embed_dim is None and self.expansion_ratio is None:
