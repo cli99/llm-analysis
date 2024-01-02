@@ -392,7 +392,7 @@ class LLMAnalysis:
         ) * self.dtype_config.weight_bits / BITS_PER_BYTE / self.parallelism_config.tp_size / mlp_sharded_dp_size
 
         weight_memory_layernorm_per_layer = self.get_num_params_per_layer_layernorm(
-        ) * self.dtype_config.weight_bits / BITS_PER_BYTE / self.parallelism_config.tp_size / sharded_dp_size
+        ) * self.dtype_config.weight_bits / BITS_PER_BYTE / sharded_dp_size
 
         weight_memory_per_layer = weight_memory_attn_per_layer + weight_memory_mlp_per_layer + weight_memory_layernorm_per_layer
 
