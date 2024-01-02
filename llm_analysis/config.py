@@ -73,7 +73,6 @@ class ModelConfig:
         elif self.ffn_embed_dim is None:
             self.ffn_embed_dim = self.hidden_dim * self.expansion_ratio
         elif self.expansion_ratio is None:
-            assert self.ffn_embed_dim % self.hidden_dim == 0, f"ffn_embed_dim ({self.ffn_embed_dim}) must be divisible by hidden_dim ({self.hidden_dim})"
             self.expansion_ratio = self.ffn_embed_dim / self.hidden_dim
 
         if self.num_key_value_heads is None:
@@ -199,6 +198,30 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
             "hf config does not have hidden_size or d_model, check the config.json file"
         )
 
+    if hasattr(hf_config, "moe_num_experts"):
+        moe_num_experts = hf_config.moe_num_experts
+    elif hasattr(hf_config, "num_local_experts"):
+        moe_num_experts = hf_config.num_local_experts
+    else:
+        moe_num_experts = 1
+        logger.info(
+            "hf config does not have moe_num_experts or num_local_experts, setting moe_num_experts = 1 (not MoE model)"
+        )
+
+    if hasattr(hf_config, "ffn_embed_dim"):
+        ffn_embed_dim = hf_config.ffn_embed_dim
+    elif hasattr(hf_config, "intermediate_size"):
+        ffn_embed_dim = hf_config.intermediate_size
+    else:
+        ffn_embed_dim = None
+
+    if ffn_embed_dim:
+        expansion_ratio = ffn_embed_dim / hidden_dim
+        if expansion_ratio == 3.5:
+            mlp_gated_linear_units = True
+    else:
+        mlp_gated_linear_units = False
+
     config = ModelConfig(
         name=canonical_model_name(name),
         max_seq_len=hf_config.max_position_embeddings if hasattr(
@@ -206,12 +229,14 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
         num_layers=num_layers,
         n_head=n_head,
         hidden_dim=hidden_dim,
+        ffn_embed_dim=ffn_embed_dim,
         vocab_size=hf_config.vocab_size,
         model_type=hf_config.model_type
         if hasattr(hf_config, "model_type") else None,
         num_key_value_heads=hf_config.num_key_value_heads if hasattr(
             hf_config, "num_key_value_heads") else None,
-    )
+        moe_num_experts=moe_num_experts,
+        mlp_gated_linear_units=mlp_gated_linear_units)
     return config
 
 

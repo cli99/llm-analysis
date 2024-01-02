@@ -292,7 +292,9 @@ class LLMAnalysis:
         Returns:
             int: the number of parameters in the two MLP linear layers
         """
-        return (3 if self.model_config.mlp_gated_linear_units else 2) * self.model_config.hidden_dim * self.model_config.ffn_embed_dim * self.model_config.moe_num_experts
+        return (
+            3 if self.model_config.mlp_gated_linear_units else 2
+        ) * self.model_config.hidden_dim * self.model_config.ffn_embed_dim * self.model_config.moe_num_experts
 
     def get_num_params_per_layer_router(self) -> int:
         if self.model_config.moe_num_experts > 1:
@@ -1662,8 +1664,8 @@ class LLMAnalysis:
         )
 
         if use_kv_cache:
-            if (batch_size_per_gpu * (seq_len + num_tokens_to_generate)
-                    < self.get_pivot()):
+            if (batch_size_per_gpu *
+                (seq_len + num_tokens_to_generate) < self.get_pivot()):
                 logger.warning(
                     "kv_cache is only useful when batch_size *"
                     " (seq+num_tokens_to_generate)"
@@ -1771,6 +1773,11 @@ class LLMAnalysis:
             "ep_size": self.parallelism_config.ep_size,
             "pp_size": self.parallelism_config.pp_size,
             "num_tokens_to_generate": num_tokens_to_generate,
+            "num_params_total": self.total_num_params,
+            "num_params_total_mlp": self.total_num_params_mlp,
+            "num_params_total_embedding": self.total_num_params_embedding,
+            "num_params_total_others": self.total_num_params_others,
+            "num_active_params_total": self.total_num_active_params,
             "flops_efficiency": self.flops_efficiency,
             "hbm_memory_efficiency": self.hbm_memory_efficiency,
             "layernorm_dtype_bytes": layernorm_dtype_bytes,
@@ -1876,16 +1883,16 @@ class LLMAnalysis:
             gradient_accumulation_steps = global_batch_size // (
                 batch_size_per_gpu * dp_size)
             assert (global_batch_size % (batch_size_per_gpu * dp_size) == 0
-                    and gradient_accumulation_steps
-                    > 0), "no valid gradient_accumulation_steps, {assert_msg}"
+                    and gradient_accumulation_steps > 0
+                    ), "no valid gradient_accumulation_steps, {assert_msg}"
         elif global_batch_size and gradient_accumulation_steps:
             # batch_size_per_gpu is None, the other two are not None
             batch_size_per_gpu = global_batch_size // (
                 gradient_accumulation_steps * dp_size)
             assert (global_batch_size %
                     (gradient_accumulation_steps * dp_size) == 0
-                    and batch_size_per_gpu
-                    > 0), "no valid batch_size_per_gpu, {assert_msg}"
+                    and batch_size_per_gpu > 0
+                    ), "no valid batch_size_per_gpu, {assert_msg}"
         elif batch_size_per_gpu and gradient_accumulation_steps or batch_size_per_gpu:
             # batch_size_per_gpu is not None
             if batch_size_per_gpu > max_batch_size_per_gpu:
@@ -1920,9 +1927,9 @@ class LLMAnalysis:
         else:
             # (global_batch_size and batch_size_per_gpu are None) or (all are None)
             batch_size_per_gpu = max_batch_size_per_gpu
-            gradient_accumulation_steps = (1 if gradient_accumulation_steps
-                                           is None else
-                                           gradient_accumulation_steps)
+            gradient_accumulation_steps = (1 if
+                                           gradient_accumulation_steps is None
+                                           else gradient_accumulation_steps)
             global_batch_size = (batch_size_per_gpu *
                                  gradient_accumulation_steps *
                                  self.parallelism_config.dp_size)

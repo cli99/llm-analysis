@@ -93,7 +93,7 @@ The pre-defined mappings are populated at the runtime from the model, GPU, and d
 
 llm-analysis also supports retrieving `ModelConfig` from a model config json file path or Hugging Face with the model name .
   - From a local model config json file, e.g., `python -m llm_analysis.analysis train --model_name=local_example_model.json`. Check the model configurations under the [model_configs](llm_analysis/model_configs) folder.
-  - From Hugging Face, e.g., use [`EleutherAI/gpt-neox-20b`](https://huggingface.co/EleutherAI/gpt-neox-20b) as `model_name` when calling the `train` or `infer` entry functions. `python -m llm_analysis.analysis train --model_name=EleutherAI/gpt-neox-20b --total_num_gpus 32 --ds_zero 3`
+  - From Hugging Face, e.g., use [`EleutherAI/gpt-neox-20b`](https://huggingface.co/EleutherAI/gpt-neox-20b) as `model_name` when calling the `train` or `infer` entry functions. `python -m llm_analysis.analysis train --model_name=EleutherAI/gpt-neox-20b --total_num_gpus 32 --ds_zero 3`. With this method, llm-analysis relies on `transformers` to find the corresponding model configuration on [huggingface.co/models](https://huggingface.co/models), meaning information of newer models only exist after certain version of the transformers library. To access latest models through their names, update the installed `transformers` package.
 
 A list of handy commands is provided to query against the pre-defined mappings as well as Hugging Face, or to dump configurations. Run ```python -m llm_analysis.config --help``` for details.
 

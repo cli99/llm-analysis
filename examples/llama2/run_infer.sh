@@ -37,5 +37,5 @@ python -m llm_analysis.analysis infer --model_name=${model_name} --gpu_name=${gp
     --seq_len=${seq_len} --num_tokens_to_generate=${num_tokens_to_generate} --batch_size_per_gpu=${batch_size_per_gpu} \
     --tp_size=${tp_size} \
     --cost_per_gpu_hour=${cost_per_gpu_hour} \
-    --flops_efficiency=${flops_efficiency} --hbm_memory_efficiency=${hbm_memory_efficiency}
+    --flops_efficiency=${flops_efficiency} --hbm_memory_efficiency=${hbm_memory_efficiency} --log_level DEBUG
 # --achieved_tflops=${achieved_tflops} --achieved_memory_bandwidth_GBs=${achieved_memory_bandwidth_GBs}

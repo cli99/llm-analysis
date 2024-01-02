@@ -6,6 +6,7 @@
     "vocab_size": 32000,
     "max_seq_len": 4096,
     "num_key_value_heads": 8,
-    "ffn_embed_dim": 32768,
-    "model_type": "llama"
+    "ffn_embed_dim": 28672,
+    "model_type": "llama",
+    "mlp_gated_linear_units": true
 }
