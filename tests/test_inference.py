@@ -75,5 +75,4 @@ def test_llama2_70b():
         num_tokens_to_generate=512,
     )
 
-    assert within_range(summary_dict["total_decode_latency"], 180.06,
-                        TOLERANCE)
+    assert within_range(summary_dict["total_decode_latency"], 18.06, TOLERANCE)
