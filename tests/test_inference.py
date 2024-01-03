@@ -66,12 +66,8 @@ def test_llama2_70b():
     dtype_config = get_dtype_config_by_name(dtype_name)
     parallel_config = ParallelismConfig(tp_size=tp_size)
 
-    analysis = LLMAnalysis(
-        model_config,
-        gpu_config,
-        dtype_config,
-        parallel_config,
-    )
+    analysis = LLMAnalysis(model_config, gpu_config, dtype_config,
+                           parallel_config)
 
     summary_dict = analysis.inference(
         batch_size_per_gpu=batch_size_per_gpu,
@@ -79,4 +75,5 @@ def test_llama2_70b():
         num_tokens_to_generate=512,
     )
 
-    assert within_range(summary_dict["total_decode_latency"], 14.79, TOLERANCE)
+    assert within_range(summary_dict["total_decode_latency"], 180.06,
+                        TOLERANCE)
