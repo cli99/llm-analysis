@@ -1582,7 +1582,7 @@ class LLMAnalysis:
 
         weight_memory_embedding_per_gpu = self.get_memory_embedding(ds_zero)
         weight_memory_layers_per_gpu, weight_memory_attn_per_gpu, weight_memory_mlp_per_gpu, weight_memory_layernorm_per_gpu = [
-            x * self.model_config.num_layers
+            x * num_layers_per_gpu
             for x in self.get_weight_memory_per_layer(ds_zero,
                                                       return_breakdown=True)
         ]
