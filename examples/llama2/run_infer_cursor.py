@@ -1,11 +1,9 @@
-from llm_analysis.config import (
-    ParallelismConfig,
-    get_dtype_config_by_name,
-    get_gpu_config_by_name,
-    get_model_config_by_name,
-)
-from llm_analysis.analysis import LLMAnalysis
 import csv
+
+from llm_analysis.analysis import LLMAnalysis
+from llm_analysis.config import (ParallelismConfig, get_dtype_config_by_name,
+                                 get_gpu_config_by_name,
+                                 get_model_config_by_name)
 
 gpu_name = "a100-sxm-80gb"
 dtype_name = "w16a16e16"

@@ -13,12 +13,9 @@
 # limitations under the License.
 
 from llm_analysis.analysis import ActivationRecomputation, DSZeRO, LLMAnalysis
-from llm_analysis.config import (
-    ParallelismConfig,
-    get_dtype_config_by_name,
-    get_gpu_config_by_name,
-    get_model_config_by_name,
-)
+from llm_analysis.config import (ParallelismConfig, get_dtype_config_by_name,
+                                 get_gpu_config_by_name,
+                                 get_model_config_by_name)
 from llm_analysis.utils import _latency_to_string, _num_to_string, within_range
 
 TOLERANCE = 0.05

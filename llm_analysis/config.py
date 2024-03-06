@@ -21,11 +21,8 @@ from pathlib import Path
 
 import fire
 
-from llm_analysis.constant import (
-    DTYPE_CONFIG_DIR_NAME,
-    GPU_CONFIG_DIR_NAME,
-    MODEL_CONFIG_DIR_NAME,
-)
+from llm_analysis.constant import (DTYPE_CONFIG_DIR_NAME, GPU_CONFIG_DIR_NAME,
+                                   MODEL_CONFIG_DIR_NAME)
 from llm_analysis.logger import logger
 
 try:

@@ -12,14 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from llm_analysis.utils import within_range
 from llm_analysis.analysis import LLMAnalysis
-from llm_analysis.config import (
-    ParallelismConfig,
-    get_dtype_config_by_name,
-    get_gpu_config_by_name,
-    get_model_config_by_name,
-)
+from llm_analysis.config import (ParallelismConfig, get_dtype_config_by_name,
+                                 get_gpu_config_by_name,
+                                 get_model_config_by_name)
+from llm_analysis.utils import within_range
 
 TOLERANCE = 0.1
 
