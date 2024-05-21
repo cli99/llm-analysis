@@ -354,10 +354,10 @@ def get_model_config_by_name(name_or_path: str) -> ModelConfig:
                     model_configs[config.name] = config
             return config
         except Exception as e:
-            raise ValueError(f"unknown gpu config name: {e}")
+            raise ValueError(f"unknown model config name: {e}")
     model_config = get_model_config_from_hf(name_or_path)
     if model_config is None:
-        raise (
+        raise ValueError(
             f"unknown model config name: {name_or_path}, and none is found on HuggingFace Hub"
         )
     return model_config

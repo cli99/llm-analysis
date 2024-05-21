@@ -393,8 +393,8 @@ class LLMAnalysis:
 
         weight_memory_per_layer = weight_memory_attn_per_layer + weight_memory_mlp_per_layer + weight_memory_layernorm_per_layer
 
-        logger.info(
-            f'weight_memory_attn_per_layer: {_num_to_string(weight_memory_attn_per_layer)}B, weight_memory_mlp_per_layer: {_num_to_string(weight_memory_mlp_per_layer)}B, weight_memory_layernorm_per_layer: {_num_to_string(weight_memory_layernorm_per_layer)}B'
+        logger.debug(
+            f'is_sharded: {is_sharded}, weight_memory_attn_per_layer: {_num_to_string(weight_memory_attn_per_layer)}B, weight_memory_mlp_per_layer: {_num_to_string(weight_memory_mlp_per_layer)}B, weight_memory_layernorm_per_layer: {_num_to_string(weight_memory_layernorm_per_layer)}B'
         )
 
         if return_breakdown:
@@ -1172,13 +1172,15 @@ class LLMAnalysis:
         Returns:
             float: the latency in seconds for the forward pass of a single layernorm in a transformer layer
         """
+        input_numel = seq_len * batch_size * self.model_config.hidden_dim
+        compute_latency = input_numel * 5 / (self.get_TFLOPS_per_gpu() * 10**12)
         activation_memory = self.get_activation_memory_per_layernorm(
             batch_size,
             seq_len,
         )
         activation_memory_latency = activation_memory / (
             self.get_gpu_hbm_bandwidth() * 10**9)
-        return activation_memory_latency
+        return max(compute_latency, activation_memory_latency)
 
     def get_latency_fwd_per_tp_comm(self, batch_size: int, seq_len: int,
                                     dtype_bytes: int) -> float:
@@ -2060,19 +2062,7 @@ class LLMAnalysis:
                            estimated_bwd_prefetch_memory_per_gpu))
 
         logger.info(
-            f"weight_memory_per_gpu: {_num_to_string(weight_memory_per_gpu)}B"
-            " (embedding_memory:"
-            f" {_num_to_string(weight_memory_embedding_per_gpu)}B),"
-            " optimizer_state_memory_per_gpu:"
-            f" {_num_to_string(optimizer_state_memory_per_gpu)}B,"
-            " gradient_memory_per_gpu:"
-            f" {_num_to_string(gradient_memory_per_gpu)}B",
-            " estimated_fwd_prefetch_memory_per_gpu:"
-            f" {_num_to_string(estimated_fwd_prefetch_memory_per_gpu)}B",
-            " estimated_bwd_prefetch_memory_per_gpu:"
-            f" {_num_to_string(estimated_bwd_prefetch_memory_per_gpu)}B",
-            " memory_left:"
-            f" {_num_to_string(memory_left)}B",
+            f"weight_memory_per_gpu: {_num_to_string(weight_memory_per_gpu)}B (embedding_memory: {_num_to_string(weight_memory_embedding_per_gpu)}B), optimizer_state_memory_per_gpu: {_num_to_string(optimizer_state_memory_per_gpu)}B, gradient_memory_per_gpu: {_num_to_string(gradient_memory_per_gpu)}B, estimated_fwd_prefetch_memory_per_gpu: {_num_to_string(estimated_fwd_prefetch_memory_per_gpu)}B, estimated_bwd_prefetch_memory_per_gpu: {_num_to_string(estimated_bwd_prefetch_memory_per_gpu)}B"
         )
 
         if memory_left < 0:
@@ -2230,18 +2220,25 @@ class LLMAnalysis:
             ds_zero=ds_zero,
         )
 
+        latency_fwd_per_layer_attn_compute = self.get_latency_fwd_per_layer_attn(
+            batch_size_per_gpu, seq_len, False, activation_recomputation)
+        latency_fwd_per_layer_mlp_compute = self.get_latency_fwd_per_layer_mlp(
+            batch_size_per_gpu, seq_len, False, activation_recomputation)
+        latency_fwd_per_layernorm_compute = self.get_latency_fwd_per_layernorm(
+            batch_size_per_gpu,
+            seq_len,
+            layernorm_dtype_bytes,
+        )
+        num_layers_per_gpu = int(self.model_config.num_layers /
+                                 self.parallelism_config.pp_size)
         if activation_recomputation == ActivationRecomputation.FULL:
-            latency_recompute = latency_fwd
+            latency_recompute = num_layers_per_gpu * (latency_fwd_per_layer_attn_compute + latency_fwd_per_layer_mlp_compute + 2 * latency_fwd_per_layernorm_compute)
         elif activation_recomputation == ActivationRecomputation.NORM_ATTN_NORM:
-            latency_recompute = self.get_latency_fwd_per_layer_attn(
-                batch_size_per_gpu, seq_len, False, activation_recomputation
-            ) + 2 * self.get_latency_fwd_per_layernorm(
-                batch_size_per_gpu, seq_len, layernorm_dtype_bytes)
+            latency_recompute = num_layers_per_gpu * (latency_fwd_per_layer_attn_compute + 2 * latency_fwd_per_layernorm_compute)
         elif activation_recomputation == ActivationRecomputation.ATTN:
-            latency_recompute = self.get_latency_fwd_per_layer_attn(
-                batch_size_per_gpu, seq_len, False, activation_recomputation)
+            latency_recompute =  num_layers_per_gpu * latency_fwd_per_layer_attn_compute
         elif activation_recomputation == ActivationRecomputation.ATTN_COMPUTE:
-            latency_recompute = self.get_num_flops_total_attn_compute(
+            latency_recompute = num_layers_per_gpu * self.get_num_flops_total_attn_compute(
                 batch_size_per_gpu, seq_len) / (
                     (self.parallelism_config.tp_size *
                      self.parallelism_config.pp_size) *
@@ -2300,6 +2297,7 @@ class LLMAnalysis:
 
         else:
             total_training_latency = None
+            total_training_latency_using_flops = None
 
         gpu_hours = (total_training_latency * total_num_gpus /
                      3600 if total_training_latency is not None else None)
@@ -2404,23 +2402,18 @@ class LLMAnalysis:
             estimated_fwd_prefetch_memory_per_gpu,
             "estimated_bwd_prefetch_memory_per_gpu":
             estimated_bwd_prefetch_memory_per_gpu,
-            "estimated_peak_fwd_memory_per_gpu":
-            optimizer_state_memory_per_gpu + weight_memory_per_gpu +
-            activation_memory_per_gpu + estimated_fwd_prefetch_memory_per_gpu,
-            "estimated_peak_bwd_memory_per_gpu":
-            optimizer_state_memory_per_gpu + weight_memory_per_gpu +
-            activation_memory_per_gpu + estimated_bwd_prefetch_memory_per_gpu,
-            "memory_left_per_gpu":
-            memory_left,
+            "estimated_peak_allocated_memory_per_gpu":
+            self.gpu_config.mem_per_GPU_in_GB * 1024**3 - memory_left,
             "latency_per_micro_batch":
             latency_per_micro_batch,
             "latency_fwd":
             latency_fwd,
         }
         summary_dict.update(latency_fwd_breakdown)
+        device_tokens_per_sec = round(seq_len * batch_size_per_gpu / latency_per_iter, 2)
         summary_dict.update({
             "latency_per_iter": latency_per_iter,
-            "iters_per_sec": round(1 / latency_per_iter, 2),
+            "device_tokens_per_sec": device_tokens_per_sec,
             "total_training_latency": total_training_latency,
             "latency_per_iter_using_flops": latency_per_iter_using_flops,
             "total_training_latency_using_flops":
