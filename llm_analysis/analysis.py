@@ -2067,7 +2067,7 @@ class LLMAnalysis:
         estimated_fwd_prefetch_memory_per_gpu = unsharded_weight_memory_embedding + unsharded_weight_memory_per_layer
 
         estimated_bwd_prefetch_memory_per_gpu = (
-            3 + int(fwd_prefetch) +
+            int(fwd_prefetch) +
             int(bwd_prefetch)) * (unsharded_weight_memory_per_layer)
 
         estimated_prefetch_memory_per_gpu = max(
