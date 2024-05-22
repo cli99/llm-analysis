@@ -2122,15 +2122,9 @@ class LLMAnalysis:
         ]
 
         activation_memory_input_embedding_batch_size_1 = self.get_activation_memory_input_embedding(1, seq_len)
-        logger.info(
-            f"activation_memory_input_embedding for micro batch size 1: {_num_to_string(activation_memory_input_embedding_batch_size_1)}B"
-        )
         activation_memory_batch_size_1 += activation_memory_input_embedding_batch_size_1
         activation_memory_output_embedding_batch_size_1 = self.get_activation_memory_output_embedding(
             1, seq_len)
-        logger.info(
-            f"activation_memory_output_embedding for micro batch size 1: {_num_to_string(activation_memory_output_embedding_batch_size_1)}B"
-        )
         activation_memory_batch_size_1 += activation_memory_output_embedding_batch_size_1
         activation_memory_batch_size_1 += self.get_activation_memory_per_layernorm(
             1,
@@ -2143,13 +2137,17 @@ class LLMAnalysis:
                 f"memory_left {_num_to_string(memory_left)} < activation_memory_batch_size_1 {_num_to_string(activation_memory_batch_size_1)}"
             )
 
+        logger.info(
+            f"activation_memory_per_gpu with micro batch size 1: {_num_to_string(activation_memory_batch_size_1)}B (attn + mlp + layernorm + input_embed + output_embed: {_num_to_string(attn_activation_memory_batch_size_1)}B + {_num_to_string(mlp_activation_memory_batch_size_1)}B + {_num_to_string(layernorm_activation_memory_batch_size_1)}B + {_num_to_string(activation_memory_input_embedding_batch_size_1)}B + {_num_to_string(activation_memory_output_embedding_batch_size_1)}B)"
+        )
+
         max_batch_size_per_gpu = int(memory_left //
                                      activation_memory_batch_size_1)
         while memory_left < max(estimated_prefetch_memory_per_gpu, self.get_loss_bwd_memory(max_batch_size_per_gpu, seq_len)) + activation_memory_batch_size_1 * max_batch_size_per_gpu:
             max_batch_size_per_gpu -= 1
 
         logger.info(
-            f"activation_memory for micro batch size 1: {_num_to_string(activation_memory_batch_size_1)}B, max_batch_size_per_gpu: {max_batch_size_per_gpu}"
+            f"max_batch_size_per_gpu: {max_batch_size_per_gpu}, estimated_prefetch_memory_per_gpu: {_num_to_string(estimated_prefetch_memory_per_gpu)}B, loss_bwd_memory: {_num_to_string(self.get_loss_bwd_memory(max_batch_size_per_gpu, seq_len))}B"
         )
 
         (
@@ -2197,14 +2195,13 @@ class LLMAnalysis:
                 seq_len,
                 layernorm_dtype_bytes,
             )
-
-        logger.info("activation_memory_per_gpu with micro batch size"
-                    f" {batch_size_per_gpu}:"
-                    f" {_num_to_string(activation_memory_per_gpu)}B")
+            logger.info(
+                f"activation_memory_per_gpu with micro batch size {batch_size_per_gpu}: {_num_to_string(activation_memory_per_gpu)}B (attn + mlp + layernorm + input_embed + output_embed: {_num_to_string(activation_memory_attn_per_gpu)}B + {_num_to_string(activation_memory_mlp_per_gpu)}B + {_num_to_string(activation_memory_layernorm_per_gpu)}B + {_num_to_string(activation_memory_input_embedding_per_gpu)}B + {_num_to_string(activation_memory_output_embedding_per_gpu)}B)"
+            )
 
         loss_bwd_memory = self.get_loss_bwd_memory(batch_size_per_gpu, seq_len)
 
-        if  memory_left < activation_memory_per_gpu + max(estimated_prefetch_memory_per_gpu, loss_bwd_memory):
+        if memory_left < activation_memory_per_gpu + max(estimated_prefetch_memory_per_gpu, loss_bwd_memory):
             logger.warning(
                 "activation_memory_per_gpu memory or loss_bwd_memory is too large with batch_size_per_gpu ="
                 f" {batch_size_per_gpu} to fit in GPU memory (requiring"
@@ -2448,9 +2445,10 @@ class LLMAnalysis:
             "(weight+op_state+act)_memory_per_gpu":
             optimizer_state_memory_per_gpu + weight_memory_per_gpu +
             activation_memory_per_gpu,
+            "(weight+op_state+grad)_memory_per_gpu":
+            self.weight_grad_op_state_memory_per_gpu,
             "estimated_peak_memory_per_gpu":
-            optimizer_state_memory_per_gpu + weight_memory_per_gpu +
-            activation_memory_per_gpu + max(estimated_bwd_prefetch_memory_per_gpu, loss_bwd_memory),
+            optimizer_state_memory_per_gpu + weight_memory_per_gpu + max(activation_memory_per_gpu, gradient_memory_per_gpu) + max(estimated_bwd_prefetch_memory_per_gpu, loss_bwd_memory),
             "latency_per_micro_batch":
             latency_per_micro_batch,
             "latency_fwd":
