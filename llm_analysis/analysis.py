@@ -755,10 +755,19 @@ class LLMAnalysis:
         return (seq_len * batch_size * self.model_config.hidden_dim /
                 self.parallelism_config.sp_size) * dtype_bytes
 
+    def get_activation_memory_input_embedding(self, batch_size: int,
+                                               seq_len: int) -> float:
+        """Get the memory (in bytes) required to store the activations of output embedding (logits)"""
+        return self.model_config.hidden_dim * batch_size * seq_len * self.dtype_config.activation_bits / BITS_PER_BYTE / self.parallelism_config.tp_size
+
     def get_activation_memory_output_embedding(self, batch_size: int,
                                                seq_len: int) -> float:
         """Get the memory (in bytes) required to store the activations of output embedding (logits)"""
         return self.model_config.vocab_size * batch_size * seq_len * self.dtype_config.activation_bits / BITS_PER_BYTE / self.parallelism_config.tp_size
+
+    def get_loss_bwd_memory(self, batch_size: int, seq_len: int) -> float:
+        """Get the temporary memory (in bytes) required for the backward pass of the loss function"""
+        return self.get_activation_memory_output_embedding(batch_size, seq_len)
 
     def get_activation_memory_per_layer(
         self,
@@ -1500,9 +1509,10 @@ class LLMAnalysis:
         summary_dict: dict,
         output_dir: str,
         print_human_readable: bool = True,
+        output_file_prefix: str = "",
         output_file_suffix: str = "",
     ):
-        file_name = self.get_configs_desc(
+        file_name = output_file_prefix + self.get_configs_desc(
         ) + output_file_suffix + "-summary.json"
 
         if not os.path.exists(output_dir):
@@ -1519,7 +1529,7 @@ class LLMAnalysis:
             f"Summary written to {os.path.join(output_dir, file_name)}")
         if print_human_readable:
             log_str = self.get_readable_summary_dict(summary_dict)
-            file_name = self.get_configs_desc(
+            file_name = output_file_prefix + self.get_configs_desc(
             ) + output_file_suffix + "-summary-readable.txt"
             with open(os.path.join(output_dir, file_name), "w") as f:
                 f.write(log_str)
@@ -1538,6 +1548,7 @@ class LLMAnalysis:
         kv_cache_dtype_bytes: int = None,
         cost_per_gpu_hour: float = None,
         output_dir: str = None,
+        output_file_prefix: str = "",
         output_file_suffix: str = "",
     ) -> dict:
         """Inference analysis given the configs and inputs.
@@ -1611,12 +1622,12 @@ class LLMAnalysis:
             is_inference=True,
             layernorm_dtype_bytes=layernorm_dtype_bytes,
         )
-        prefill_activation_memory_embedding_output_batch_size_1 = self.get_activation_memory_output_embedding(
+        prefill_activation_memory_output_embedding_batch_size_1 = self.get_activation_memory_output_embedding(
             1, seq_len)
 
         prefill_activation_memory_batch_size_1 = max(
             prefill_activation_memory_per_layer_batch_size_1,
-            prefill_activation_memory_embedding_output_batch_size_1)
+            prefill_activation_memory_output_embedding_batch_size_1)
 
         prefill_max_batch_size_per_gpu = int(
             memory_left / prefill_activation_memory_batch_size_1)
@@ -1631,11 +1642,11 @@ class LLMAnalysis:
             is_inference=True,
             layernorm_dtype_bytes=layernorm_dtype_bytes,
         )
-        prefill_activation_memory_embedding_output = self.get_activation_memory_output_embedding(
+        prefill_activation_memory_output_embedding = self.get_activation_memory_output_embedding(
             batch_size_per_gpu, seq_len)
         prefill_activation_memory_per_gpu = max(
             prefill_activation_memory_per_layer,
-            prefill_activation_memory_embedding_output)
+            prefill_activation_memory_output_embedding)
 
         logger.info("prefill_activation_memory_per_gpu with batch_size_per_gpu"
                     f" {batch_size_per_gpu}:"
@@ -1687,11 +1698,11 @@ class LLMAnalysis:
                 is_inference=True,
                 layernorm_dtype_bytes=layernorm_dtype_bytes,
             )
-            decode_activation_memory_embedding_output = self.get_activation_memory_output_embedding(
+            decode_activation_memory_output_embedding = self.get_activation_memory_output_embedding(
                 batch_size_per_gpu, 1)
             decode_activation_memory_per_gpu = max(
                 decode_activation_memory_per_layer,
-                decode_activation_memory_embedding_output)
+                decode_activation_memory_output_embedding)
 
             logger.info(
                 "kv_cache_memory_per_gpu:"
@@ -1845,6 +1856,7 @@ class LLMAnalysis:
             self.output_summary_dict(summary_dict,
                                      output_dir,
                                      print_human_readable=True,
+                                     output_file_prefix=output_file_prefix,
                                      output_file_suffix=output_file_suffix)
 
         return summary_dict
@@ -1965,6 +1977,7 @@ class LLMAnalysis:
         mlp_2linear_quant_bits: int = None,
         mlp_recompute_gelu: bool = False,
         output_dir: str = None,
+        output_file_prefix: str = "",
         output_file_suffix: str = "",
     ) -> dict:
         """Training analysis given the configs and inputs.
@@ -2056,18 +2069,31 @@ class LLMAnalysis:
             3 + int(fwd_prefetch) +
             int(bwd_prefetch)) * (unsharded_weight_memory_per_layer)
 
+        estimated_prefetch_memory_per_gpu = max(estimated_fwd_prefetch_memory_per_gpu,
+                           estimated_bwd_prefetch_memory_per_gpu)
+
         memory_left = (self.gpu_config.mem_per_GPU_in_GB * 1024**3 -
-                       self.weight_grad_op_state_memory_per_gpu -
-                       max(estimated_fwd_prefetch_memory_per_gpu,
-                           estimated_bwd_prefetch_memory_per_gpu))
+                       weight_memory_per_gpu - optimizer_state_memory_per_gpu)
 
         logger.info(
             f"weight_memory_per_gpu: {_num_to_string(weight_memory_per_gpu)}B (embedding_memory: {_num_to_string(weight_memory_embedding_per_gpu)}B), optimizer_state_memory_per_gpu: {_num_to_string(optimizer_state_memory_per_gpu)}B, gradient_memory_per_gpu: {_num_to_string(gradient_memory_per_gpu)}B, estimated_fwd_prefetch_memory_per_gpu: {_num_to_string(estimated_fwd_prefetch_memory_per_gpu)}B, estimated_bwd_prefetch_memory_per_gpu: {_num_to_string(estimated_bwd_prefetch_memory_per_gpu)}B"
         )
 
+
         if memory_left < 0:
             logger.warning(
-                "model weight/optimizer state/gradient or fwd/bwd prefetch memory usage is too large to fit in GPU memory"
+                "model weight/optimizer state memory usage is too large to fit in GPU memory"
+            )
+
+        if memory_left - max(estimated_prefetch_memory_per_gpu, gradient_memory_per_gpu) < 0:
+            logger.warning(
+                "model gradient or bwd prefetch memory usage is too large to fit in GPU memory"
+            )
+
+        loss_bwd_memory_batch_size_1 = self.get_loss_bwd_memory(1, seq_len)
+        if memory_left - loss_bwd_memory_batch_size_1 < 0:
+            logger.warning(
+                "loss_bwd_memory is too large to fit in GPU memory"
             )
 
         # With pipeline parallelism, each stage contains L/p layers so the first stage must store p ×L/p = L layers worth of activations regardless of the pipeline parallel size p; activation memory required for the input embeddings, the last layer-norm, and the output layer are ignored here. Refer to https://arxiv.org/abs/2205.05198 for more details.
@@ -2095,25 +2121,32 @@ class LLMAnalysis:
                       layernorm_activation_memory_per_layer_batch_size_1)
         ]
 
-        activation_memory_embedding_output_batch_size_1 = self.get_activation_memory_output_embedding(
+        activation_memory_input_embedding_batch_size_1 = self.get_activation_memory_input_embedding(1, seq_len)
+        logger.info(
+            f"activation_memory_input_embedding for micro batch size 1: {_num_to_string(activation_memory_input_embedding_batch_size_1)}B"
+        )
+        activation_memory_batch_size_1 += activation_memory_input_embedding_batch_size_1
+        activation_memory_output_embedding_batch_size_1 = self.get_activation_memory_output_embedding(
             1, seq_len)
         logger.info(
-            f"activation_memory_embedding_output for micro batch size 1: {_num_to_string(activation_memory_embedding_output_batch_size_1)}B"
+            f"activation_memory_output_embedding for micro batch size 1: {_num_to_string(activation_memory_output_embedding_batch_size_1)}B"
         )
-        activation_memory_batch_size_1 += activation_memory_embedding_output_batch_size_1
+        activation_memory_batch_size_1 += activation_memory_output_embedding_batch_size_1
         activation_memory_batch_size_1 += self.get_activation_memory_per_layernorm(
             1,
             seq_len,
             layernorm_dtype_bytes,
         )
 
-        max_batch_size_per_gpu = int(memory_left //
-                                     activation_memory_batch_size_1)
-
-        if memory_left < activation_memory_batch_size_1:
+        if memory_left - max(estimated_prefetch_memory_per_gpu, loss_bwd_memory_batch_size_1) < activation_memory_batch_size_1:
             logger.warning(
                 f"memory_left {_num_to_string(memory_left)} < activation_memory_batch_size_1 {_num_to_string(activation_memory_batch_size_1)}"
             )
+
+        max_batch_size_per_gpu = int(memory_left //
+                                     activation_memory_batch_size_1)
+        while memory_left < max(estimated_prefetch_memory_per_gpu, self.get_loss_bwd_memory(max_batch_size_per_gpu, seq_len)) + activation_memory_batch_size_1 * max_batch_size_per_gpu:
+            max_batch_size_per_gpu -= 1
 
         logger.info(
             f"activation_memory for micro batch size 1: {_num_to_string(activation_memory_batch_size_1)}B, max_batch_size_per_gpu: {max_batch_size_per_gpu}"
@@ -2132,6 +2165,8 @@ class LLMAnalysis:
 
         if batch_size_per_gpu == 1:
             activation_memory_per_gpu, activation_memory_attn_per_gpu, activation_memory_mlp_per_gpu, activation_memory_layernorm_per_gpu = activation_memory_batch_size_1, attn_activation_memory_batch_size_1, mlp_activation_memory_batch_size_1, layernorm_activation_memory_batch_size_1
+            activation_memory_input_embedding_per_gpu = activation_memory_input_embedding_batch_size_1
+            activation_memory_output_embedding_per_gpu = activation_memory_output_embedding_batch_size_1
         else:
             activation_memory_per_gpu, activation_memory_attn_per_gpu, activation_memory_mlp_per_gpu, activation_memory_layernorm_per_gpu = [
                 x * self.model_config.num_layers
@@ -2151,27 +2186,34 @@ class LLMAnalysis:
                     return_breakdown=True,
                 )
             ]
-        activation_memory_embedding_output_per_gpu = self.get_activation_memory_output_embedding(
-            batch_size_per_gpu, seq_len)
-        activation_memory_per_gpu += activation_memory_embedding_output_per_gpu
-        activation_memory_per_gpu += self.get_activation_memory_per_layernorm(
-            batch_size_per_gpu,
-            seq_len,
-            layernorm_dtype_bytes,
-        )
+            activation_memory_input_embedding_per_gpu = self.get_activation_memory_input_embedding(
+                batch_size_per_gpu, seq_len)
+            activation_memory_output_embedding_per_gpu = self.get_activation_memory_output_embedding(
+                batch_size_per_gpu, seq_len)
+            activation_memory_per_gpu += activation_memory_input_embedding_per_gpu
+            activation_memory_per_gpu += activation_memory_output_embedding_per_gpu
+            activation_memory_per_gpu += self.get_activation_memory_per_layernorm(
+                batch_size_per_gpu,
+                seq_len,
+                layernorm_dtype_bytes,
+            )
 
         logger.info("activation_memory_per_gpu with micro batch size"
                     f" {batch_size_per_gpu}:"
                     f" {_num_to_string(activation_memory_per_gpu)}B")
-        if memory_left < activation_memory_per_gpu:
+
+        loss_bwd_memory = self.get_loss_bwd_memory(batch_size_per_gpu, seq_len)
+
+        if  memory_left < activation_memory_per_gpu + max(estimated_prefetch_memory_per_gpu, loss_bwd_memory):
             logger.warning(
-                "activation memory is too large with batch_size_per_gpu ="
+                "activation_memory_per_gpu memory or loss_bwd_memory is too large with batch_size_per_gpu ="
                 f" {batch_size_per_gpu} to fit in GPU memory (requiring"
-                f" {_num_to_string(activation_memory_per_gpu)}B, memory_left after"
+                f" activation_memory_per_gpu={_num_to_string(activation_memory_per_gpu)}B, loss_bwd_memory={_num_to_string(loss_bwd_memory)}Bmemory_left after"
                 " fitting in model weights, gradients, and optimizer states ="
                 f" {_num_to_string(memory_left)}B, max_batch_size_per_gpu ="
                 f" {max_batch_size_per_gpu})")
-        memory_left -= activation_memory_per_gpu
+
+        memory_left = memory_left - activation_memory_per_gpu -  max(estimated_prefetch_memory_per_gpu, loss_bwd_memory)
 
         num_flops_fwd_total = self.get_num_flops_fwd_total(
             batch_size_per_gpu, seq_len)
@@ -2383,6 +2425,12 @@ class LLMAnalysis:
             optimizer_state_memory_per_gpu,
             "(weight+op_state)_memory_per_gpu":
             optimizer_state_memory_per_gpu + weight_memory_per_gpu,
+            "estimated_fwd_prefetch_memory_per_gpu":
+            estimated_fwd_prefetch_memory_per_gpu,
+            "estimated_bwd_prefetch_memory_per_gpu":
+            estimated_bwd_prefetch_memory_per_gpu,
+            "loss_bwd_memory":
+            loss_bwd_memory,
             "activation_memory_batch_size_1":
             activation_memory_batch_size_1,
             "activation_memory_per_gpu":
@@ -2393,17 +2441,16 @@ class LLMAnalysis:
             activation_memory_mlp_per_gpu,
             "activation_memory_layernorm_per_gpu":
             activation_memory_layernorm_per_gpu,
-            "activation_memory_embedding_output_per_gpu":
-            activation_memory_embedding_output_per_gpu,
+            "activation_memory_input_embedding_per_gpu":
+            activation_memory_input_embedding_per_gpu,
+            "activation_memory_output_embedding_per_gpu":
+            activation_memory_output_embedding_per_gpu,
             "(weight+op_state+act)_memory_per_gpu":
             optimizer_state_memory_per_gpu + weight_memory_per_gpu +
             activation_memory_per_gpu,
-            "estimated_fwd_prefetch_memory_per_gpu":
-            estimated_fwd_prefetch_memory_per_gpu,
-            "estimated_bwd_prefetch_memory_per_gpu":
-            estimated_bwd_prefetch_memory_per_gpu,
-            "estimated_peak_allocated_memory_per_gpu":
-            self.gpu_config.mem_per_GPU_in_GB * 1024**3 - memory_left,
+            "estimated_peak_memory_per_gpu":
+            optimizer_state_memory_per_gpu + weight_memory_per_gpu +
+            activation_memory_per_gpu + max(estimated_bwd_prefetch_memory_per_gpu, loss_bwd_memory),
             "latency_per_micro_batch":
             latency_per_micro_batch,
             "latency_fwd":
@@ -2427,6 +2474,7 @@ class LLMAnalysis:
             self.output_summary_dict(summary_dict,
                                      output_dir,
                                      print_human_readable=True,
+                                     output_file_prefix=output_file_prefix,
                                      output_file_suffix=output_file_suffix)
 
         return summary_dict
@@ -2456,6 +2504,7 @@ def infer(
     inter_node_memory_efficiency=INTER_NODE_MEMORY_EFFICIENCY,
     cost_per_gpu_hour: float = None,
     output_dir: str = None,
+    output_file_prefix: str = "",
     output_file_suffix: str = "",
 ) -> dict:
     """_summary_
@@ -2484,6 +2533,7 @@ def infer(
         inter_node_memory_efficiency (float, optional):  inter-node memory efficiency, ranging from 0 to 1. Defaults to INTER_NODE_MEMORY_EFFICIENCY.
         cost_per_gpu_hour (float, optional): dollar cost per GPU hour. Defaults to None.
         output_dir (str, optional): if set to a directory path, write the return summary dict out to the directory with the setup. Defaults to None.. Defaults to None.
+        output_file_prefix (str, optional): prefix of the output file. Defaults to "".
         output_file_suffix (str, optional): suffix of the output file. Defaults to "".
 
     Returns:
@@ -2529,6 +2579,7 @@ def infer(
         kv_cache_dtype_bytes=kv_cache_dtype_bytes,
         cost_per_gpu_hour=cost_per_gpu_hour,
         output_dir=output_dir,
+        output_file_prefix=output_file_prefix,
         output_file_suffix=output_file_suffix,
     )
 
@@ -2572,6 +2623,7 @@ def train(
     inter_node_memory_efficiency=INTER_NODE_MEMORY_EFFICIENCY,
     num_gpus_per_node: int = NUM_GPUS_PER_NODE,
     output_dir: str = None,
+    output_file_prefix: str = "",
     output_file_suffix: str = "",
 ) -> dict:
     """Entry point function of training analysis for the command line interface. This
@@ -2684,6 +2736,7 @@ def train(
         mlp_2linear_quant_bits=mlp_2linear_quant_bits,
         mlp_recompute_gelu=mlp_recompute_gelu,
         output_dir=output_dir,
+        output_file_prefix=output_file_prefix,
         output_file_suffix=output_file_suffix,
     )
 
