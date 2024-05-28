@@ -12,14 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from llm_analysis.utils import within_range
 from llm_analysis.analysis import LLMAnalysis
-from llm_analysis.config import (
-    ParallelismConfig,
-    get_dtype_config_by_name,
-    get_gpu_config_by_name,
-    get_model_config_by_name,
-)
+from llm_analysis.config import (ParallelismConfig, get_dtype_config_by_name,
+                                 get_gpu_config_by_name,
+                                 get_model_config_by_name)
+from llm_analysis.utils import within_range
 
 TOLERANCE = 0.1
 
@@ -55,7 +52,7 @@ def test_fastertransformer_13b_tp1():
 
 
 def test_llama2_70b():
-    model_name = "upstage/Llama-2-70b-instruct-v2"
+    model_name = "upstage_Llama-2-70b-instruct-v2"
     dtype_name = "w16a16e16"
     gpu_name = "a100-sxm-80gb"
 

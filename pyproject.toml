@@ -8,17 +8,17 @@ readme = "README.md"
 packages = [{ include = "llm_analysis" }]
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = ">=3.8"
 fire = "^0.5.0"
-huggingface-hub = "^0.14.1"
-transformers = "^4.28.1"
+# huggingface-hub = "^0.14.1"
+# transformers = "^4.28.1"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^7.3.1"
-coverage = { extras = ["toml"], version = "^7.2.5" }
-sphinx = "^7.0.0"
-sphinx-autodoc-typehints = "^1.23.0"
-pytest-cov = "^4.0.0"
+pytest = ">=7.3.1"
+coverage = { extras = ["toml"], version = ">=7.2.5" }
+sphinx = ">=7.0.0"
+sphinx-autodoc-typehints = ">=1.23.0"
+pytest-cov = ">=4.0.0"
 
 [tool.coverage.run]
 omit = [".*", "*/site-packages/*"]
