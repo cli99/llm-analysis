@@ -951,7 +951,9 @@ class LLMAnalysis:
         Returns:
             int: the number of floating point operations for the forward pass of the MLP module in a transformer layer
         """
-        return 4 * batch_size * seq_len * self.model_config.hidden_dim**2 * self.model_config.expansion_ratio
+        return (
+            6 if self.model_config.mlp_gated_linear_units else 4
+        ) * batch_size * seq_len * self.model_config.hidden_dim**2 * self.model_config.expansion_ratio
 
     def get_num_flops_fwd_per_layer(
         self,
@@ -1098,7 +1100,7 @@ class LLMAnalysis:
         latency = data_bytes / (
             (self.get_intra_node_bandwidth() if self.parallelism_config.ep_size
              <= 8 else self.get_inter_node_bandwidth()) * 10**9)
-        logger.info(
+        logger.debug(
             f'moe_alltoall data_bytes = {_num_to_string(data_bytes)}B, latency = {round(latency*1000, 3)} ms'
         )
         return latency
@@ -2693,18 +2695,25 @@ def train(
 
     rdp_size = 1
     if total_num_gpus and dp_size:
-        assert total_num_gpus % (dp_size * tp_size * pp_size), f"total_num_gpus {total_num_gpus} must be divisible by dp_size * tp_size * pp_size {dp_size * tp_size * pp_size}"
+        assert total_num_gpus % (
+            dp_size * tp_size * pp_size
+        ), f"total_num_gpus {total_num_gpus} must be divisible by dp_size * tp_size * pp_size {dp_size * tp_size * pp_size}"
         rdp_size = total_num_gpus / (dp_size * tp_size * pp_size)
     elif total_num_gpus:
-        assert (total_num_gpus % (tp_size * pp_size) == 0
-                ), f"dp_size is not specified, assuming total_num_gpus = dp_size * tp_size * pp_size, total_num_gpus must be a multiple of tp_size * pp_size"
+        assert (
+            total_num_gpus % (tp_size * pp_size) == 0
+        ), f"dp_size is not specified, assuming total_num_gpus = dp_size * tp_size * pp_size, total_num_gpus must be a multiple of tp_size * pp_size"
         dp_size = total_num_gpus // (tp_size * pp_size)
     elif dp_size:
         total_num_gpus = dp_size * tp_size * pp_size
-        logger.info(f'total_num_gpus is not specified, assuming total_num_gpus = dp_size * tp_size * pp_size')
+        logger.info(
+            f'total_num_gpus is not specified, assuming total_num_gpus = dp_size * tp_size * pp_size'
+        )
     else:
         dp_size = 1
-        logger.info(f'neither dp_size or total_num_gpus is specified, assuming dp_size = 1')
+        logger.info(
+            f'neither dp_size or total_num_gpus is specified, assuming dp_size = 1'
+        )
 
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)

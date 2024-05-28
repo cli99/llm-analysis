@@ -115,7 +115,7 @@ class ParallelismConfig:
     dp_size: int = (
         1  # sharded data parallelism size, PyTorch FSDP or DeepSpeed Zero parallelism implementation
     )
-    rdp_size: int = 1 # replicated data parallelism size, PyTorch HSDP implementation
+    rdp_size: int = 1  # replicated data parallelism size, PyTorch HSDP implementation
     ep_size: int = 1  # expert parallelism size
     sp_size: int = None  # sequence parallelism size, Megatron-LM sequence parallelism implementation
 
