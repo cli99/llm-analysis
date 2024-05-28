@@ -1,0 +1,13 @@
+{
+    "name": "dbrx",
+    "max_seq_len": 4096,
+    "num_layers": 40,
+    "n_head": 48,
+    "hidden_dim": 6144,
+    "vocab_size": 100352,
+    "expansion_ratio": 1.75,
+    "num_key_value_heads": 8,
+    "mlp_gated_linear_units": true,
+    "moe_num_experts": 16,
+    "moe_top_k": 4
+}
