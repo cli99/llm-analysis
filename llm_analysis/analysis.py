@@ -2691,18 +2691,20 @@ def train(
         " and is best kept within a single node where high bandwidth NVLink"
         " is available.")
 
+    rdp_size = 1
     if total_num_gpus and dp_size:
-        assert (
-            total_num_gpus == dp_size * tp_size * pp_size
-        ), f"total_num_gpus {total_num_gpus} must be equal to dp_size * tp_size * pp_size {dp_size * tp_size * pp_size}"
+        assert total_num_gpus % (dp_size * tp_size * pp_size), f"total_num_gpus {total_num_gpus} must be divisible by dp_size * tp_size * pp_size {dp_size * tp_size * pp_size}"
+        rdp_size = total_num_gpus / (dp_size * tp_size * pp_size)
     elif total_num_gpus:
         assert (total_num_gpus % (tp_size * pp_size) == 0
-                ), f"total_num_gpus must be a multiple of tp_size * pp_size"
+                ), f"dp_size is not specified, assuming total_num_gpus = dp_size * tp_size * pp_size, total_num_gpus must be a multiple of tp_size * pp_size"
         dp_size = total_num_gpus // (tp_size * pp_size)
     elif dp_size:
         total_num_gpus = dp_size * tp_size * pp_size
+        logger.info(f'total_num_gpus is not specified, assuming total_num_gpus = dp_size * tp_size * pp_size')
     else:
         dp_size = 1
+        logger.info(f'neither dp_size or total_num_gpus is specified, assuming dp_size = 1')
 
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
@@ -2713,6 +2715,7 @@ def train(
         tp_size=tp_size,
         pp_size=pp_size,
         dp_size=dp_size,
+        rdp_size=rdp_size,
         sp_size=sp_size if sp_size else tp_size,
         ep_size=ep_size)
 

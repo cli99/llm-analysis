@@ -113,8 +113,9 @@ class ParallelismConfig:
     tp_size: int = 1  # tensor parallelism size, Megatron-LM tensor parallelism implementation
     pp_size: int = 1  # pipeline parallelism size, Megatron-LM pipeline parallelism implementation
     dp_size: int = (
-        1  # data parallelism size, DeepSpeed Zero parallelism implementation
+        1  # sharded data parallelism size, PyTorch FSDP or DeepSpeed Zero parallelism implementation
     )
+    rdp_size: int = 1 # replicated data parallelism size, PyTorch HSDP implementation
     ep_size: int = 1  # expert parallelism size
     sp_size: int = None  # sequence parallelism size, Megatron-LM sequence parallelism implementation
 
