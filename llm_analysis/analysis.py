@@ -1887,7 +1887,7 @@ class LLMAnalysis:
         """
         assert_msg = (f"note that global_batch_size == batch_size_per_gpu *"
                       f" gradient_accumulation_steps * dp_size")
-        dp_size = self.parallelism_config.dp_size
+        dp_size = self.parallelism_config.dp_size * self.parallelism_config.rdp_size
         if (global_batch_size and batch_size_per_gpu
                 and gradient_accumulation_steps):
             assert (global_batch_size == batch_size_per_gpu *
@@ -1945,8 +1945,7 @@ class LLMAnalysis:
                                            gradient_accumulation_steps is None
                                            else gradient_accumulation_steps)
             global_batch_size = (batch_size_per_gpu *
-                                 gradient_accumulation_steps *
-                                 self.parallelism_config.dp_size)
+                                 gradient_accumulation_steps * dp_size)
             logger.info("batch_size_per_gpu not set, using batch_size_per_gpu"
                         f" {batch_size_per_gpu} (max_batch_size_per_gpu ="
                         f" {max_batch_size_per_gpu})")
@@ -2316,7 +2315,8 @@ class LLMAnalysis:
 
         total_num_gpus = (self.parallelism_config.tp_size *
                           self.parallelism_config.pp_size *
-                          self.parallelism_config.dp_size)
+                          self.parallelism_config.dp_size *
+                          self.parallelism_config.rdp_size)
 
         if total_num_tokens is not None:
             if total_num_tokens < 20 * self.total_num_params:
@@ -2367,6 +2367,8 @@ class LLMAnalysis:
             global_batch_size,
             "dp_size":
             self.parallelism_config.dp_size,
+            "rdp_size":
+            self.parallelism_config.rdp_size,
             "tp_size":
             self.parallelism_config.tp_size,
             "pp_size":
@@ -2697,8 +2699,8 @@ def train(
     if total_num_gpus and dp_size:
         assert total_num_gpus % (
             dp_size * tp_size * pp_size
-        ), f"total_num_gpus {total_num_gpus} must be divisible by dp_size * tp_size * pp_size {dp_size * tp_size * pp_size}"
-        rdp_size = total_num_gpus / (dp_size * tp_size * pp_size)
+        ) == 0, f"total_num_gpus {total_num_gpus} must be divisible by dp_size * tp_size * pp_size which is {dp_size * tp_size * pp_size}"
+        rdp_size = int(total_num_gpus / (dp_size * tp_size * pp_size))
     elif total_num_gpus:
         assert (
             total_num_gpus % (tp_size * pp_size) == 0
@@ -2714,7 +2716,9 @@ def train(
         logger.info(
             f'neither dp_size or total_num_gpus is specified, assuming dp_size = 1'
         )
-
+    logger.info(
+        f'replicated data parallel process size {rdp_size=}, {dp_size=}, {total_num_gpus=}'
+    )
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
