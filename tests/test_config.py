@@ -19,7 +19,7 @@ from llm_analysis.config import (DtypeConfig, GPUConfig, ModelConfig,
 
 
 def test_get_model_config_by_name():
-    model_name = "facebook/opt-125m"
+    model_name = "facebook_opt-125m"
     model_config = get_model_config_by_name(model_name)
     assert isinstance(model_config, ModelConfig)
     assert model_config.num_layers == 12

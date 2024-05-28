@@ -52,7 +52,7 @@ def test_fastertransformer_13b_tp1():
 
 
 def test_llama2_70b():
-    model_name = "upstage/Llama-2-70b-instruct-v2"
+    model_name = "upstage_Llama-2-70b-instruct-v2"
     dtype_name = "w16a16e16"
     gpu_name = "a100-sxm-80gb"
 
