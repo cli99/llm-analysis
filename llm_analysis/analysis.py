@@ -475,9 +475,9 @@ class LLMAnalysis:
 
         memory_optimizer_state_others_per_layer = op_bytes_per_params * (
             (self.get_num_params_per_layer_attn() +
-             +self.get_num_params_per_layer_router() +
-             self.get_num_params_per_layer_layernorm())
-        ) / self.parallelism_config.tp_size / sharded_dp_size
+             +self.get_num_params_per_layer_router()) /
+            self.parallelism_config.tp_size +
+            self.get_num_params_per_layer_layernorm()) / sharded_dp_size
 
         memory_optimizer_state_per_layer = memory_optimizer_state_mlp_per_layer + memory_optimizer_state_others_per_layer
 
@@ -1218,9 +1218,9 @@ class LLMAnalysis:
         elems_per_all_reduce = (2 * batch_size * seq_len *
                                 self.model_config.hidden_dim * (tp_size - 1) /
                                 tp_size)
-        latency_per_all_reduce = (
-            elems_per_all_reduce * dtype_bytes /
-            (self.gpu_config.intra_node_bandwidth_in_GB_per_sec * 10**9))
+        # assuming tp_size <= number of GPUs per node, thus using intra-node bandwidth
+        latency_per_all_reduce = (elems_per_all_reduce * dtype_bytes /
+                                  (self.get_intra_node_bandwidth() * 10**9))
 
         return max(
             latency_per_all_reduce,
