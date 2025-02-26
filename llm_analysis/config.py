@@ -50,17 +50,19 @@ class ModelConfig:
     hidden_dim: int  # hidden dimension
     vocab_size: int  # vocabulary size
     max_seq_len: int = None  # max sequence length
-    num_key_value_heads: int = None  # the number of key value heads implementing Grouped Query Attention (GQA), If it is not specified, will default to n_head. If `num_key_value_heads=num_attention_heads`, the model will use Multi Head Attention (MHA), if `num_key_value_heads=1 the model will use Multi Query Attention (MQA) otherwise GQA is used. See https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/configuration_llama.py for details
+    num_key_value_heads: int = (
+        None  # the number of key value heads implementing Grouped Query Attention (GQA), If it is not specified, will default to n_head. If `num_key_value_heads=num_attention_heads`, the model will use Multi Head Attention (MHA), if `num_key_value_heads=1 the model will use Multi Query Attention (MQA) otherwise GQA is used. See https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/configuration_llama.py for details
+    )
     num_key_value_groups: int = None  # number of key value groups for GQA
-    ffn_embed_dim: int = (
-        None  # hidden dimension of FFN, default to 4 * hidden_dim
-    )
+    ffn_embed_dim: int = None  # hidden dimension of FFN, default to 4 * hidden_dim
     expansion_ratio: float = None
-    model_type: str = (
-        None  # model type as tagged on Hugging Face (e.g., gpt2, opt, llama.)
-    )
+    model_type: str = None
     moe_num_experts: int = 1  # number of experts for mixture of experts model
+    moe_num_shared_experts: int = (
+        1  # number of shared experts for mixture of experts model
+    )
     moe_top_k: int = 1  # top k experts for mixture of experts model
+    moe_intermediate_size: int = None  # intermediate size of MoE layer
     mlp_gated_linear_units: bool = False  # whether to use gated linear units for MLP
 
     def __post_init__(self):
@@ -71,11 +73,16 @@ class ModelConfig:
             self.ffn_embed_dim = self.hidden_dim * self.expansion_ratio
         elif self.expansion_ratio is None:
             self.expansion_ratio = self.ffn_embed_dim / self.hidden_dim
-
         if self.num_key_value_heads is None:
             self.num_key_value_heads = self.n_head
-        assert self.n_head % self.num_key_value_heads == 0, f"n_head ({self.n_head}) must be divisible by num_key_value_heads ({self.num_key_value_heads})"
+        assert (
+            self.n_head % self.num_key_value_heads == 0
+        ), f"n_head ({self.n_head}) must be divisible by num_key_value_heads ({self.num_key_value_heads})"
         self.num_key_value_groups = self.n_head / self.num_key_value_heads
+        if self.moe_intermediate_size is None:
+            self.moe_intermediate_size = self.ffn_embed_dim
+        if self.model_type is None:
+            self.model_type = "unknown"
 
     def __str__(self):
         return dataclasses.asdict(self).__str__()
@@ -87,11 +94,15 @@ class GPUConfig:
     mem_per_GPU_in_GB: float  # memory per GPU in GB
     hbm_bandwidth_in_GB_per_sec: float  # GPU HBM bandwidth in GB/s
     intra_node_bandwidth_in_GB_per_sec: float  # intra node GPU bandwidth in GB/s
-    intra_node_min_message_latency: float  # minimum intra node message latency in seconds
+    intra_node_min_message_latency: (
+        float  # minimum intra node message latency in seconds
+    )
     peak_fp16_TFLOPS: float  # peak Tensor TFLOPS for FP16
     peak_i8_TFLOPS: float = None  # peak Tensor TFLOPS for INT8
     peak_i4_TFLOPS: float = None  # peak Tensor TFLOPS for INT4
-    inter_node_bandwidth_in_GB_per_sec: float = 200  # inter node bandwidth in GB/s, assuming Mellanox 200Gbps HDR Infiniband
+    inter_node_bandwidth_in_GB_per_sec: float = (
+        200  # inter node bandwidth in GB/s, assuming Mellanox 200Gbps HDR Infiniband
+    )
 
     def __post_init__(self):
         if self.peak_i8_TFLOPS is None:
@@ -110,14 +121,20 @@ class DtypeConfig:
 
 @dataclass
 class ParallelismConfig:
-    tp_size: int = 1  # tensor parallelism size, Megatron-LM tensor parallelism implementation
-    pp_size: int = 1  # pipeline parallelism size, Megatron-LM pipeline parallelism implementation
+    tp_size: int = (
+        1  # tensor parallelism size, Megatron-LM tensor parallelism implementation
+    )
+    pp_size: int = (
+        1  # pipeline parallelism size, Megatron-LM pipeline parallelism implementation
+    )
     dp_size: int = (
         1  # sharded data parallelism size, PyTorch FSDP or DeepSpeed Zero parallelism implementation
     )
     rdp_size: int = 1  # replicated data parallelism size, PyTorch HSDP implementation
     ep_size: int = 1  # expert parallelism size
-    sp_size: int = None  # sequence parallelism size, Megatron-LM sequence parallelism implementation
+    sp_size: int = (
+        None  # sequence parallelism size, Megatron-LM sequence parallelism implementation
+    )
 
     def __post_init__(self):
         if self.sp_size is None:
@@ -200,11 +217,37 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
         moe_num_experts = hf_config.moe_num_experts
     elif hasattr(hf_config, "num_local_experts"):
         moe_num_experts = hf_config.num_local_experts
+    elif hasattr(hf_config, "n_routed_experts"):
+        moe_num_experts = hf_config.n_routed_experts
     else:
         moe_num_experts = 1
         logger.info(
             "hf config does not have moe_num_experts or num_local_experts, setting moe_num_experts = 1 (not MoE model)"
         )
+
+    if hasattr(hf_config, "num_experts_per_tok"):
+        moe_top_k = hf_config.num_experts_per_tok
+    elif hasattr(hf_config, "moe_top_k"):
+        moe_top_k = hf_config.moe_top_k
+    else:
+        moe_top_k = 1
+        logger.info(
+            "hf config does not have num_experts_per_tok or moe_top_k, setting moe_top_k = 1"
+        )
+
+    if hasattr(hf_config, "moe_num_shared_experts"):
+        moe_num_shared_experts = hf_config.moe_num_shared_experts
+    elif hasattr(hf_config, "n_shared_experts"):
+        moe_num_shared_experts = hf_config.n_shared_experts
+    else:
+        moe_num_shared_experts = 1
+        logger.info(
+            "hf config does not have moe_num_shared_experts or n_shared_experts, setting moe_num_shared_experts = 1"
+        )
+    if hasattr(hf_config, "moe_intermediate_size"):
+        moe_intermediate_size = hf_config.moe_intermediate_size
+    else:
+        moe_intermediate_size = None
 
     if hasattr(hf_config, "ffn_embed_dim"):
         ffn_embed_dim = hf_config.ffn_embed_dim
@@ -213,17 +256,20 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
     else:
         ffn_embed_dim = None
 
+    mlp_gated_linear_units = False
     if ffn_embed_dim:
+        model_type = (hf_config.model_type
+                      if hasattr(hf_config, "model_type") else "unknown")
         expansion_ratio = ffn_embed_dim / hidden_dim
-        if expansion_ratio == 3.5:
+        if expansion_ratio == 3.5 and model_type == "llama":
             mlp_gated_linear_units = True
-    else:
-        mlp_gated_linear_units = False
+        elif model_type == "deepseek_v3":
+            mlp_gated_linear_units = True
 
     config = ModelConfig(
         name=canonical_model_name(name),
-        max_seq_len=hf_config.max_position_embeddings if hasattr(
-            hf_config, "max_position_embeddings") else None,
+        max_seq_len=(hf_config.max_position_embeddings if hasattr(
+            hf_config, "max_position_embeddings") else None),
         num_layers=num_layers,
         n_head=n_head,
         hidden_dim=hidden_dim,
@@ -231,10 +277,13 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
         vocab_size=hf_config.vocab_size,
         model_type=hf_config.model_type
         if hasattr(hf_config, "model_type") else None,
-        num_key_value_heads=hf_config.num_key_value_heads if hasattr(
-            hf_config, "num_key_value_heads") else None,
+        num_key_value_heads=(hf_config.num_key_value_heads if hasattr(
+            hf_config, "num_key_value_heads") else None),
         moe_num_experts=moe_num_experts,
-        mlp_gated_linear_units=mlp_gated_linear_units)
+        moe_top_k=moe_top_k,
+        moe_intermediate_size=moe_intermediate_size,
+        mlp_gated_linear_units=mlp_gated_linear_units,
+    )
     return config
 
 
@@ -448,6 +497,6 @@ if __name__ == "__main__":
             "dump_hf_model_configs_by_type_and_task":
             dump_hf_model_configs_by_type_and_task,
         },
-        serialize=lambda x: json.dumps(x, cls=EnhancedJSONEncoder, indent=4)
-        if dataclasses.is_dataclass(x) else x,
+        serialize=lambda x: (json.dumps(x, cls=EnhancedJSONEncoder, indent=4)
+                             if dataclasses.is_dataclass(x) else x),
     )
