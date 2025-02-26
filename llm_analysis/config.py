@@ -16,8 +16,9 @@ import dataclasses
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any, Dict
 
 import fire
 
@@ -44,48 +45,101 @@ class EnhancedJSONEncoder(json.JSONEncoder):
 
 @dataclass
 class ModelConfig:
-    name: str  # model config name
-    num_layers: int  # number of transformer layers (blocks)
-    n_head: int  # number of attention heads
-    hidden_dim: int  # hidden dimension
-    vocab_size: int  # vocabulary size
-    max_seq_len: int = None  # max sequence length
-    num_key_value_heads: int = (
-        None  # the number of key value heads implementing Grouped Query Attention (GQA), If it is not specified, will default to n_head. If `num_key_value_heads=num_attention_heads`, the model will use Multi Head Attention (MHA), if `num_key_value_heads=1 the model will use Multi Query Attention (MQA) otherwise GQA is used. See https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/configuration_llama.py for details
-    )
-    num_key_value_groups: int = None  # number of key value groups for GQA
-    ffn_embed_dim: int = None  # hidden dimension of FFN, default to 4 * hidden_dim
-    expansion_ratio: float = None
-    model_type: str = None
-    moe_num_experts: int = 1  # number of experts for mixture of experts model
-    moe_num_shared_experts: int = (
-        1  # number of shared experts for mixture of experts model
-    )
-    moe_top_k: int = 1  # top k experts for mixture of experts model
-    moe_intermediate_size: int = None  # intermediate size of MoE layer
-    mlp_gated_linear_units: bool = False  # whether to use gated linear units for MLP
+    """Configuration class for transformer-based models with support for various attention mechanisms."""
 
-    def __post_init__(self):
+    # Required fields
+    name: str  # Model configuration name
+    num_layers: int  # Number of transformer layers (blocks)
+    n_head: int  # Number of attention heads
+    hidden_dim: int  # Hidden dimension size
+    vocab_size: int  # Vocabulary size
+
+    # Optional fields with defaults
+    max_seq_len: int | None = None  # Maximum sequence length
+
+    # Attention mechanism configuration
+    num_key_value_heads: int | None = None  # Number of key-value heads for attention
+    num_key_value_groups: float | None = field(
+        default=None,
+        repr=True)  # Number of key-value groups (calculated in post_init)
+
+    # Feed-forward network configuration
+    ffn_embed_dim: int | None = None  # Hidden dimension of feed-forward network
+    expansion_ratio: float | None = (
+        None  # Expansion ratio for hidden_dim to ffn_embed_dim
+    )
+
+    # Model type and architecture configuration
+    model_type: str = "unknown"  # Model architecture type
+    mlp_gated_linear_units: bool = False  # Whether to use gated linear units for MLP
+
+    # Mixture of Experts (MoE) configuration
+    moe_num_experts: int | None = None  # Number of experts for MoE
+    moe_num_shared_experts: int | None = None  # Number of shared experts for MoE
+    moe_top_k: int | None = None  # Top-k experts to use per token
+    moe_intermediate_size: int | None = None  # Intermediate size of MoE layer
+    first_k_dense_replace: int | None = (
+        None  # Number of dense layers to replace with MoE
+    )
+
+    def __post_init__(self) -> None:
+        """
+        Initialize derived properties and perform validation on the configuration.
+
+        This method:
+        1. Sets ffn_embed_dim and expansion_ratio if not provided
+        2. Sets num_key_value_heads to n_head if not provided
+        3. Validates attention head configuration
+        4. Calculates num_key_value_groups
+        """
+        # Handle feed-forward network dimension settings
         if self.ffn_embed_dim is None and self.expansion_ratio is None:
             self.ffn_embed_dim = self.hidden_dim * 4
-            self.expansion_ratio = 4
-        elif self.ffn_embed_dim is None:
-            self.ffn_embed_dim = self.hidden_dim * self.expansion_ratio
-        elif self.expansion_ratio is None:
+            self.expansion_ratio = 4.0
+        elif self.ffn_embed_dim is None and self.expansion_ratio is not None:
+            self.ffn_embed_dim = int(self.hidden_dim * self.expansion_ratio)
+        elif self.expansion_ratio is None and self.ffn_embed_dim is not None:
             self.expansion_ratio = self.ffn_embed_dim / self.hidden_dim
+
+        # Handle attention mechanism settings
         if self.num_key_value_heads is None:
             self.num_key_value_heads = self.n_head
-        assert (
-            self.n_head % self.num_key_value_heads == 0
-        ), f"n_head ({self.n_head}) must be divisible by num_key_value_heads ({self.num_key_value_heads})"
-        self.num_key_value_groups = self.n_head / self.num_key_value_heads
-        if self.moe_intermediate_size is None:
-            self.moe_intermediate_size = self.ffn_embed_dim
-        if self.model_type is None:
-            self.model_type = "unknown"
 
-    def __str__(self):
-        return dataclasses.asdict(self).__str__()
+        # Validate attention head configuration
+        if self.n_head % self.num_key_value_heads != 0:
+            raise ValueError(
+                f"n_head ({self.n_head}) must be divisible by "
+                f"num_key_value_heads ({self.num_key_value_heads})")
+
+        # Calculate number of key-value groups
+        self.num_key_value_groups = self.n_head / self.num_key_value_heads
+
+    def __str__(self) -> str:
+        """Return a formatted string representation of the configuration."""
+        config_dict = asdict(self)
+        formatted_items = [f"{k}={v}" for k, v in config_dict.items()]
+        return f"ModelConfig({', '.join(formatted_items)})"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the configuration to a dictionary."""
+        return asdict(self)
+
+    @property
+    def attention_type(self) -> str:
+        """
+        Returns the attention mechanism type used in the model.
+
+        Returns:
+            str: "MHA" for Multi-Head Attention
+                 "MQA" for Multi-Query Attention
+                 "GQA" for Grouped-Query Attention
+        """
+        if self.num_key_value_heads == self.n_head:
+            return "MHA"  # Multi-Head Attention
+        elif self.num_key_value_heads == 1:
+            return "MQA"  # Multi-Query Attention
+        else:
+            return "GQA"  # Grouped-Query Attention
 
 
 @dataclass
@@ -244,10 +298,13 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
         logger.info(
             "hf config does not have moe_num_shared_experts or n_shared_experts, setting moe_num_shared_experts = 1"
         )
+    first_k_dense_replace = None
+    if hasattr(hf_config, "first_k_dense_replace"):
+        first_k_dense_replace = hf_config.first_k_dense_replace
+
+    moe_intermediate_size = None
     if hasattr(hf_config, "moe_intermediate_size"):
         moe_intermediate_size = hf_config.moe_intermediate_size
-    else:
-        moe_intermediate_size = None
 
     if hasattr(hf_config, "ffn_embed_dim"):
         ffn_embed_dim = hf_config.ffn_embed_dim
@@ -283,6 +340,7 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
         moe_top_k=moe_top_k,
         moe_intermediate_size=moe_intermediate_size,
         mlp_gated_linear_units=mlp_gated_linear_units,
+        first_k_dense_replace=first_k_dense_replace,
     )
     return config
 

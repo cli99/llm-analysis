@@ -167,8 +167,7 @@ class LLMAnalysis:
                 " parallelism")
 
         self.total_num_params = self.get_num_params_total()
-        self.total_num_params_mlp = (self.get_num_params_per_layer_mlp() *
-                                     self.model_config.num_layers)
+        self.total_num_params_mlp = self.get_num_params_mlp_total()
         self.total_num_params_embedding = self.get_num_params_embedding()
         self.total_num_params_others = (self.total_num_params -
                                         self.total_num_params_mlp -
@@ -278,17 +277,32 @@ class LLMAnalysis:
                 (self.model_config.hidden_dim * num_key_value_heads /
                  self.model_config.n_head))
 
-    def get_num_params_per_layer_mlp(self) -> int:
+    def get_num_params_per_layer_mlp(self, dense_replace: bool = False) -> int:
         """Get the number of parameters in the MLP linear layers, including the
         intermediate and output matrices.
 
         Returns:
             int: the number of parameters in the two MLP linear layers
         """
-        return ((3 if self.model_config.mlp_gated_linear_units else 2) *
+        num_params = 0
+        if self.model_config.moe_num_experts > 1 and not dense_replace:
+            num_params = (
+                (3 if self.model_config.mlp_gated_linear_units else 2) *
                 self.model_config.hidden_dim *
-                self.model_config.ffn_embed_dim *
+                self.model_config.moe_intermediate_size *
                 self.model_config.moe_num_experts)
+            if self.model_config.moe_num_shared_experts:
+                intermediate_size = (self.model_config.moe_intermediate_size *
+                                     self.model_config.n_shared_experts)
+                num_params += (
+                    (3 if self.model_config.mlp_gated_linear_units else 2) *
+                    self.model_config.hidden_dim * intermediate_size)
+
+        else:
+            num_params = (
+                (3 if self.model_config.mlp_gated_linear_units else 2) *
+                self.model_config.hidden_dim * self.model_config.ffn_embed_dim)
+        return num_params
 
     def get_num_params_per_layer_router(self) -> int:
         if self.model_config.moe_num_experts > 1:
@@ -302,7 +316,7 @@ class LLMAnalysis:
     def get_num_params_last_layernorm(self) -> int:
         return self.model_config.hidden_dim
 
-    def get_num_params_per_layer(self) -> int:
+    def get_num_params_per_layer(self, dense_replace: bool = False) -> int:
         """Get the number of parameters in a transformer layer, including the attention
         and MLP linear layers.
 
@@ -311,7 +325,7 @@ class LLMAnalysis:
         """
 
         return (self.get_num_params_per_layer_attn() +
-                self.get_num_params_per_layer_mlp() +
+                self.get_num_params_per_layer_mlp(dense_replace) +
                 self.get_num_params_per_layer_router() +
                 self.get_num_params_per_layer_layernorm())
 
@@ -337,10 +351,37 @@ class LLMAnalysis:
         Returns:
             int: the total number of parameters in the model
         """
-        return (
-            self.model_config.num_layers * self.get_num_params_per_layer() +
-            self.get_num_params_embedding() +
-            self.get_num_params_last_layernorm())
+        num_params = (self.get_num_params_embedding() +
+                      self.get_num_params_last_layernorm())
+        num_layers = self.model_config.num_layers
+        if self.model_config.first_k_dense_replace:
+            num_params += (
+                self.model_config.first_k_dense_replace *
+                self.get_num_params_per_layer(dense_replace=True) +
+                (num_layers - self.model_config.first_k_dense_replace) *
+                self.get_num_params_per_layer(dense_replace=False))
+        else:
+            num_params += num_layers * self.get_num_params_per_layer()
+        return num_params
+
+    def get_num_params_mlp_total(self) -> int:
+        """Get the total number of parameters in the model, including all the
+        transformer layers and the embedding layer.
+
+        Returns:
+            int: the total number of parameters in the model
+        """
+        num_params = 0
+        num_layers = self.model_config.num_layers
+        if self.model_config.first_k_dense_replace:
+            num_params += (
+                self.model_config.first_k_dense_replace *
+                self.get_num_params_per_layer_mlp(dense_replace=True) +
+                (num_layers - self.model_config.first_k_dense_replace) *
+                self.get_num_params_per_layer_mlp(dense_replace=False))
+        else:
+            num_params += num_layers * self.get_num_params_per_layer_mlp()
+        return num_params
 
     def get_num_active_params_total(self) -> int:
         """Get the total number of parameters in the model, including all the
