@@ -59,7 +59,7 @@ class ModelConfig:
 
     # Attention mechanism configuration
     num_key_value_heads: int | None = None  # Number of key-value heads for attention
-    num_key_value_groups: float | None = field(
+    num_key_value_groups: int | None = field(
         default=None,
         repr=True)  # Number of key-value groups (calculated in post_init)
 
