@@ -81,6 +81,14 @@ class ModelConfig:
     first_k_dense_replace: int | None = (
         None  # Number of dense layers to replace with MoE
     )
+    q_lora_rank: int | None = None  # Rank for Q LoRA (Low-Rank Adaptation)
+    kv_lora_rank: int | None = None  # Rank for KV LoRA (Low-Rank Adaptation)
+    qk_nope_head_dim: int | None = (
+        None  # Head dimension for QK NoPE (No Position Embedding)
+    )
+    qk_rope_head_dim: int | None = (
+        None  # Head dimension for QK RoPE (Rotary Position Embedding)
+    )
 
     def __post_init__(self) -> None:
         """
@@ -241,6 +249,11 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
         )
         return None
     hf_config = AutoConfig.from_pretrained(name, trust_remote_code=True)
+
+    model_type = "unknown"
+    if hasattr(hf_config, "model_type"):
+        model_type = hf_config.model_type
+
     if hasattr(hf_config, "num_hidden_layers"):
         num_layers = hf_config.num_hidden_layers
     elif hasattr(hf_config, "n_layers"):
@@ -249,6 +262,7 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
         raise Exception(
             "hf config does not have num_hidden_layers or n_layers, check the config.json file"
         )
+
     if hasattr(hf_config, "num_attention_heads"):
         n_head = hf_config.num_attention_heads
     elif hasattr(hf_config, "n_heads"):
@@ -266,6 +280,23 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
         raise Exception(
             "hf config does not have hidden_size or d_model, check the config.json file"
         )
+
+    if hasattr(hf_config, "ffn_embed_dim"):
+        ffn_embed_dim = hf_config.ffn_embed_dim
+    elif hasattr(hf_config, "intermediate_size"):
+        ffn_embed_dim = hf_config.intermediate_size
+    else:
+        ffn_embed_dim = None
+
+    mlp_gated_linear_units = False
+    if ffn_embed_dim:
+        model_type = (hf_config.model_type
+                      if hasattr(hf_config, "model_type") else "unknown")
+        expansion_ratio = ffn_embed_dim / hidden_dim
+        if expansion_ratio == 3.5 and model_type == "llama":
+            mlp_gated_linear_units = True
+        elif model_type == "deepseek_v3":
+            mlp_gated_linear_units = True
 
     if hasattr(hf_config, "moe_num_experts"):
         moe_num_experts = hf_config.moe_num_experts
@@ -306,22 +337,18 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
     if hasattr(hf_config, "moe_intermediate_size"):
         moe_intermediate_size = hf_config.moe_intermediate_size
 
-    if hasattr(hf_config, "ffn_embed_dim"):
-        ffn_embed_dim = hf_config.ffn_embed_dim
-    elif hasattr(hf_config, "intermediate_size"):
-        ffn_embed_dim = hf_config.intermediate_size
-    else:
-        ffn_embed_dim = None
-
-    mlp_gated_linear_units = False
-    if ffn_embed_dim:
-        model_type = (hf_config.model_type
-                      if hasattr(hf_config, "model_type") else "unknown")
-        expansion_ratio = ffn_embed_dim / hidden_dim
-        if expansion_ratio == 3.5 and model_type == "llama":
-            mlp_gated_linear_units = True
-        elif model_type == "deepseek_v3":
-            mlp_gated_linear_units = True
+    q_lora_rank = None
+    if hasattr(hf_config, "q_lora_rank"):
+        q_lora_rank = hf_config.q_lora_rank
+    kv_lora_rank = None
+    if hasattr(hf_config, "kv_lora_rank"):
+        kv_lora_rank = hf_config.kv_lora_rank
+    qk_nope_head_dim = None
+    if hasattr(hf_config, "qk_nope_head_dim"):
+        qk_nope_head_dim = hf_config.qk_nope_head_dim
+    qk_rope_head_dim = None
+    if hasattr(hf_config, "qk_rope_head_dim"):
+        qk_rope_head_dim = hf_config.qk_rope_head_dim
 
     config = ModelConfig(
         name=canonical_model_name(name),
@@ -341,6 +368,11 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
         moe_intermediate_size=moe_intermediate_size,
         mlp_gated_linear_units=mlp_gated_linear_units,
         first_k_dense_replace=first_k_dense_replace,
+        moe_num_shared_experts=moe_num_shared_experts,
+        q_lora_rank=q_lora_rank,
+        kv_lora_rank=kv_lora_rank,
+        qk_nope_head_dim=qk_nope_head_dim,
+        qk_rope_head_dim=qk_rope_head_dim,
     )
     return config
 

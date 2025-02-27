@@ -293,7 +293,7 @@ class LLMAnalysis:
                 self.model_config.moe_num_experts)
             if self.model_config.moe_num_shared_experts:
                 intermediate_size = (self.model_config.moe_intermediate_size *
-                                     self.model_config.n_shared_experts)
+                                     self.model_config.moe_num_shared_experts)
                 num_params += (
                     (3 if self.model_config.mlp_gated_linear_units else 2) *
                     self.model_config.hidden_dim * intermediate_size)
