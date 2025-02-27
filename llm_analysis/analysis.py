@@ -209,15 +209,13 @@ class LLMAnalysis:
         return (self.gpu_config.inter_node_bandwidth_in_GB_per_sec *
                 self.inter_node_memory_efficiency)
 
-    def get_TFLOPS_per_gpu(self) -> float:
+    def get_TFLOPS_per_gpu(self, wbits, abits) -> float:
         """Get the expected TFLOPS per GPU for the specified data type configuration/GPU
         (adjusted by flops_efficiency)
 
         Returns:
             float: TFLOPS per GPU
         """
-        wbits = self.dtype_config.weight_bits
-        abits = self.dtype_config.activation_bits
         higher_bits = max(
             wbits, abits)  # gemm dtype/TFLOPS is determined by the higher bits
         if higher_bits == 4:
@@ -230,14 +228,14 @@ class LLMAnalysis:
             gemm_TFOPS = self.gpu_config.peak_fp16_TFLOPS
         return gemm_TFOPS * self.flops_efficiency
 
-    def get_pivot(self) -> float:
+    def get_pivot(self, wbits, abits) -> float:
         """Return the pivot point, defined as (model_weights / hbm_bandwidth) /
         (model_flops / TFLOPS_per_gpu)
 
         Returns:
             float: pivot point
         """
-        pivot = (self.get_TFLOPS_per_gpu() * 10**3 *
+        pivot = (self.get_TFLOPS_per_gpu(wbits, abits) * 10**3 *
                  self.dtype_config.activation_bits / BITS_PER_BYTE /
                  self.get_gpu_hbm_bandwidth() / 2)
         return pivot
@@ -395,7 +393,7 @@ class LLMAnalysis:
                 self.get_num_params_embedding() +
                 self.get_num_params_last_layernorm())
 
-    def get_weight_memory_per_layer(
+    def get_memory_weight_per_layer(
         self,
         is_sharded: bool = False,
         ds_zero: DSZeRO = DSZeRO.NONE,
@@ -421,16 +419,17 @@ class LLMAnalysis:
             mlp_sharded_dp_size = 1
 
         weight_memory_attn_per_layer = (self.get_num_params_per_layer_attn() *
-                                        self.dtype_config.weight_bits /
+                                        self.dtype_config.linear_weight_bits /
                                         BITS_PER_BYTE /
                                         self.parallelism_config.tp_size /
                                         sharded_dp_size)
 
         weight_memory_mlp_per_layer = (
-            (self.get_num_params_per_layer_mlp() /
-             self.parallelism_config.ep_size +
-             self.get_num_params_per_layer_router()) *
-            self.dtype_config.weight_bits / BITS_PER_BYTE /
+            ((self.get_num_params_per_layer_mlp() /
+              self.parallelism_config.ep_size) *
+             self.dtype_config.linear_weight_bits +
+             self.get_num_params_per_layer_router() *
+             self.dtype_config.weight_bits) / BITS_PER_BYTE /
             self.parallelism_config.tp_size / mlp_sharded_dp_size)
 
         weight_memory_layernorm_per_layer = (
@@ -454,7 +453,7 @@ class LLMAnalysis:
             )
         return weight_memory_per_layer
 
-    def get_weight_memory_last_layernorm(self, ds_zero: DSZeRO = DSZeRO.NONE):
+    def get_memory_weight_last_layernorm(self, ds_zero: DSZeRO = DSZeRO.NONE):
         weight_memory_last_layernorm = (self.get_num_params_last_layernorm() *
                                         self.dtype_config.weight_bits /
                                         BITS_PER_BYTE /
@@ -883,7 +882,7 @@ class LLMAnalysis:
         mlp_1linear_quant_bits: int = None,
         mlp_gelu_input_quant_bits: int = None,
         mlp_2linear_quant_bits: int = None,
-        mlp_recompute_gelu: bool = False,
+        mlp_recompute_act: bool = False,
         return_breakdown: bool = False,
     ) -> Union[float, tuple]:
         """Get the memory (in bytes) required to store the activations of a
@@ -905,7 +904,7 @@ class LLMAnalysis:
             mlp_activation_quant_bits (int, optional): number of bits to quantize MLP activations; if set, override the values for mlp_1linear_quant_bits, mlp_gelu_input_quant_bits and mlp_2linear_quant_bits. Defaults to None.
             mlp_1linear_quant_bits (int, optional): number of bits to quantize the input activations of the first linear layer. Defaults to None.
             mlp_gelu_input_quant_bits (int, optional): number of bits to quantize the GELU input activations. Defaults to None.
-            mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.            mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
+            mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.            mlp_recompute_act (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
         Returns:
             Union[float, tuple]: the memory (in bytes) required to store the activations of a transformer layer or a tuple of its breakdown
         """
@@ -946,7 +945,7 @@ class LLMAnalysis:
             mlp_1linear_quant_bits=mlp_1linear_quant_bits,
             mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
             mlp_2linear_quant_bits=mlp_2linear_quant_bits,
-            recompute_gelu=mlp_recompute_gelu,
+            recompute_gelu=mlp_recompute_act,
             gated_linear_units=self.model_config.mlp_gated_linear_units,
         )
 
@@ -1026,24 +1025,38 @@ class LLMAnalysis:
         return memory_kv_cache_per_layer
 
     def get_num_flops_fwd_per_layer_attn(self, batch_size: int,
-                                         seq_len: int) -> int:
-        """Get the number of floating point operations (flops) for the forward pass of
-        the attention module in a transformer layer, given the batch size and sequence
-        length. The count is model-specific and does not depend on the parallelism
-        strategy.
+                                         seq_len: int) -> tuple[int, int]:
+        """Calculate floating point operations (FLOPs) for the attention module's forward pass.
+
+        This function computes FLOPs for a transformer layer's attention mechanism, breaking down
+        costs between linear projections and attention operations. The calculation is invariant
+        to parallelization strategies.
 
         Args:
-            batch_size (int): batch size
-            seq_len (int): sequence length
+            batch_size: Number of sequences processed in parallel
+            seq_len: Number of tokens in each sequence
 
         Returns:
-            int: the number of floating point operations for the forward pass of the attention module in a transformer layer
+            tuple[int,int]:
+                - projection_flops: FLOPs for query, key, value, and output projections
+                - attention_flops: FLOPs for attention matrix computation and context creation
         """
-        return (4 * batch_size * seq_len * self.model_config.hidden_dim**2 +
-                4 * batch_size * seq_len * self.model_config.hidden_dim**2 /
-                self.model_config.num_key_value_groups +
-                4 * batch_size * seq_len**2 * self.model_config.hidden_dim
-                )  # q proj + attn_out + k proj + v proj + compute_attn
+        hidden_dim = self.model_config.hidden_dim
+        kv_groups = self.model_config.num_key_value_groups
+
+        # Calculate projection FLOPs (2 ops per multiply-add operation)
+        q_proj_flops = 2 * batch_size * seq_len * hidden_dim**2
+        k_proj_flops = 2 * batch_size * seq_len * hidden_dim**2 / kv_groups
+        v_proj_flops = 2 * batch_size * seq_len * hidden_dim**2 / kv_groups
+        out_proj_flops = 2 * batch_size * seq_len * hidden_dim**2
+
+        # Total projection FLOPs
+        projection_flops = q_proj_flops + k_proj_flops + v_proj_flops + out_proj_flops
+
+        # Attention computation FLOPs (scales quadratically with sequence length)
+        attention_flops = 4 * batch_size * seq_len**2 * hidden_dim
+
+        return projection_flops, attention_flops
 
     def get_num_flops_fwd_per_layer_mlp(self, batch_size: int,
                                         seq_len: int) -> int:
@@ -1078,9 +1091,17 @@ class LLMAnalysis:
         Returns:
             int: the number of floating point operations for the forward pass of a transformer layer
         """
-        return self.get_num_flops_fwd_per_layer_attn(
-            batch_size, seq_len) + self.get_num_flops_fwd_per_layer_mlp(
-                batch_size, seq_len)
+        # Get FLOPs breakdown for attention mechanism
+        attention_projection_flops, attention_compute_flops = (
+            self.get_num_flops_fwd_per_layer_attn(batch_size, seq_len))
+
+        # Get FLOPs for feed-forward network
+        mlp_flops = self.get_num_flops_fwd_per_layer_mlp(batch_size, seq_len)
+
+        # Sum all components for total layer FLOPs
+        total_flops = attention_projection_flops + attention_compute_flops + mlp_flops
+
+        return total_flops
 
     def get_num_flops_fwd_total(self, batch_size: int, seq_len: int) -> int:
         """Get the number of floating point operations (flops) for the forward pass of
@@ -1173,9 +1194,16 @@ class LLMAnalysis:
         """
         tp_size = self.parallelism_config.tp_size
 
+        attention_projection_flops, attention_compute_flops = (
+            self.get_num_flops_fwd_per_layer_attn(batch_size, seq_len))
         compute_latency = (
-            self.get_num_flops_fwd_per_layer_attn(batch_size, seq_len) /
-            tp_size / (self.get_TFLOPS_per_gpu() * 10**12))
+            attention_projection_flops / tp_size / (self.get_TFLOPS_per_gpu(
+                self.dtype_config.linear_weight_bits,
+                self.dtype_config.linear_activation_bits,
+            ) * 10**12)) + (attention_compute_flops / tp_size /
+                            (self.get_TFLOPS_per_gpu(
+                                self.dtype_config.weight_bits,
+                                self.dtype_config.activation_bits) * 10**12))
 
         weight_memory = (self.get_num_params_per_layer_attn() *
                          self.dtype_config.weight_bits / BITS_PER_BYTE)
@@ -1240,11 +1268,14 @@ class LLMAnalysis:
 
         compute_latency = (
             self.get_num_flops_fwd_per_layer_mlp(batch_size, seq_len) /
-            tp_size / (self.get_TFLOPS_per_gpu() * 10**12))
+            tp_size / (self.get_TFLOPS_per_gpu(
+                self.dtype_config.linear_weight_bits,
+                self.dtype_config.linear_activation_bits,
+            ) * 10**12))
 
         weight_memory = (self.get_num_params_per_layer_mlp() /
                          self.parallelism_config.ep_size *
-                         self.dtype_config.weight_bits / BITS_PER_BYTE)
+                         self.dtype_config.linear_weight_bits / BITS_PER_BYTE)
         weight_memory_latency = (weight_memory / tp_size /
                                  (self.get_gpu_hbm_bandwidth() * 10**9))
 
@@ -1294,8 +1325,9 @@ class LLMAnalysis:
             float: the latency in seconds for the forward pass of a single layernorm in a transformer layer
         """
         input_numel = seq_len * batch_size * self.model_config.hidden_dim
-        compute_latency = input_numel * 5 / (self.get_TFLOPS_per_gpu() *
-                                             10**12)
+        compute_latency = (input_numel * 5 / (self.get_TFLOPS_per_gpu(
+            self.dtype_config.weight_bits, self.dtype_config.activation_bits) *
+                                              10**12))
         activation_memory = self.get_activation_memory_per_layernorm(
             batch_size,
             seq_len,
@@ -1347,7 +1379,8 @@ class LLMAnalysis:
             return S * (n - 1) / (B * n)
 
         params_bytes_mlp = (self.get_num_params_per_layer_mlp() / ep_size *
-                            self.dtype_config.weight_bits / BITS_PER_BYTE)
+                            self.dtype_config.linear_weight_bits /
+                            BITS_PER_BYTE)
         params_bytes_non_mlp = ((self.get_num_params_per_layer_attn() +
                                  self.get_num_params_per_layer_router() +
                                  self.get_num_params_per_layer_layernorm()) *
@@ -1497,12 +1530,13 @@ class LLMAnalysis:
         Returns:
             float: the latency in seconds for the forward pass of the output embedding layer
         """
-        compute_latency = (2 * seq_len * batch_size *
-                           self.model_config.vocab_size *
-                           self.model_config.hidden_dim /
-                           self.parallelism_config.tp_size /
-                           self.parallelism_config.pp_size /
-                           (self.get_TFLOPS_per_gpu() * 10**12))
+        compute_latency = (
+            2 * seq_len * batch_size * self.model_config.vocab_size *
+            self.model_config.hidden_dim / self.parallelism_config.tp_size /
+            self.parallelism_config.pp_size /
+            (self.get_TFLOPS_per_gpu(self.dtype_config.weight_bits,
+                                     self.dtype_config.activation_bits) *
+             10**12))
         return compute_latency
 
     def get_latency_fwd(
@@ -1719,10 +1753,10 @@ class LLMAnalysis:
             weight_memory_layernorm_per_gpu,
         ) = [
             x * num_layers_per_gpu
-            for x in self.get_weight_memory_per_layer(ds_zero,
+            for x in self.get_memory_weight_per_layer(ds_zero,
                                                       return_breakdown=True)
         ]
-        weight_memory_last_layernorm = self.get_weight_memory_last_layernorm(
+        weight_memory_last_layernorm = self.get_memory_weight_last_layernorm(
             ds_zero)
         weight_memory_per_gpu = (weight_memory_layers_per_gpu +
                                  weight_memory_embedding_per_gpu +
@@ -2105,7 +2139,7 @@ class LLMAnalysis:
         mlp_1linear_quant_bits: int = None,
         mlp_gelu_input_quant_bits: int = None,
         mlp_2linear_quant_bits: int = None,
-        mlp_recompute_gelu: bool = False,
+        mlp_recompute_act: bool = False,
         output_dir: str = None,
         output_file_prefix: str = "",
         output_file_suffix: str = "",
@@ -2129,7 +2163,7 @@ class LLMAnalysis:
             mlp_1linear_quant_bits (int, optional): number of bits to quantize the input activations of the first linear layer. Defaults to None.
             mlp_gelu_input_quant_bits (int, optional): number of bits to quantize the GELU input activations. Defaults to None.
             mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.
-            mlp_recompute_gelu (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
+            mlp_recompute_act (bool, optional): whether to recompute the gelu activation in the MLP backward pass. Defaults to False.
             output_dir (str, optional): if set to a directory path, write the return summary dict out to the directory with the setup. Defaults to None.
 
         Returns:
@@ -2171,10 +2205,10 @@ class LLMAnalysis:
             weight_memory_mlp_per_gpu,
             weight_memory_layernorm_per_gpu,
         ) = [
-            x * num_layers_per_gpu for x in self.get_weight_memory_per_layer(
+            x * num_layers_per_gpu for x in self.get_memory_weight_per_layer(
                 is_sharded=True, ds_zero=ds_zero, return_breakdown=True)
         ]
-        weight_memory_last_layernorm = self.get_weight_memory_last_layernorm(
+        weight_memory_last_layernorm = self.get_memory_weight_last_layernorm(
             ds_zero)
         weight_memory_per_gpu = (weight_memory_embedding_per_gpu +
                                  weight_memory_layers_per_gpu +
@@ -2184,7 +2218,7 @@ class LLMAnalysis:
             unsharded_weight_memory_attn_per_layer,
             unsharded_weight_memory_mlp_per_layer,
             unshared_weight_memory_layernorm,
-        ) = self.get_weight_memory_per_layer(is_sharded=False,
+        ) = self.get_memory_weight_per_layer(is_sharded=False,
                                              ds_zero=ds_zero,
                                              return_breakdown=True)
 
@@ -2266,7 +2300,7 @@ class LLMAnalysis:
             mlp_1linear_quant_bits=mlp_1linear_quant_bits,
             mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
             mlp_2linear_quant_bits=mlp_2linear_quant_bits,
-            mlp_recompute_gelu=mlp_recompute_gelu,
+            mlp_recompute_act=mlp_recompute_act,
             return_breakdown=True,
         )
         (
@@ -2366,7 +2400,7 @@ class LLMAnalysis:
                     mlp_1linear_quant_bits=mlp_1linear_quant_bits,
                     mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
                     mlp_2linear_quant_bits=mlp_2linear_quant_bits,
-                    mlp_recompute_gelu=mlp_recompute_gelu,
+                    mlp_recompute_act=mlp_recompute_act,
                     return_breakdown=True,
                 )
             ]
@@ -2412,8 +2446,10 @@ class LLMAnalysis:
         elif (activation_recomputation
               == ActivationRecomputation.NORM_ATTN_NORM
               or activation_recomputation == ActivationRecomputation.ATTN):
-            num_flops_recompute = (self.get_num_flops_fwd_per_layer_attn(
-                batch_size_per_gpu, seq_len) * self.model_config.num_layers)
+            attn_linear, attn_calc = self.get_num_flops_fwd_per_layer_attn(
+                batch_size_per_gpu, seq_len)
+            num_flops_recompute = (attn_linear +
+                                   attn_calc) * self.model_config.num_layers
         elif activation_recomputation == ActivationRecomputation.ATTN_COMPUTE:
             num_flops_recompute = self.get_num_flops_total_attn_compute(
                 batch_size_per_gpu, seq_len)
@@ -2434,14 +2470,17 @@ class LLMAnalysis:
             f" {_num_to_string(num_flops_recompute, divisor=1000)} recompute)")
 
         # estimated by flops only:
-        latency_per_micro_batch_using_flops = num_flops_total_per_micro_batch / (
-            (self.parallelism_config.tp_size * self.parallelism_config.pp_size)
-            * self.get_TFLOPS_per_gpu() * 1e12)
-        logger.info(
-            f"latency_per_micro_batch_using_flops = {round(latency_per_micro_batch_using_flops*1000, 3)} ms"
-        )
-        latency_per_iter_using_flops = (latency_per_micro_batch_using_flops *
-                                        gradient_accumulation_steps)
+        # latency_per_micro_batch_using_flops = num_flops_total_per_micro_batch / (
+        #     (self.parallelism_config.tp_size * self.parallelism_config.pp_size)
+        #     * self.get_TFLOPS_per_gpu()
+        #     * 1e12
+        # )
+        # logger.info(
+        #     f"latency_per_micro_batch_using_flops = {round(latency_per_micro_batch_using_flops*1000, 3)} ms"
+        # )
+        # latency_per_iter_using_flops = (
+        #     latency_per_micro_batch_using_flops * gradient_accumulation_steps
+        # )
 
         latency_fwd, latency_fwd_breakdown = self.get_latency_fwd(
             batch_size_per_gpu,
@@ -2514,8 +2553,9 @@ class LLMAnalysis:
                     f" {round(total_num_tokens/self.total_num_params, 3)} ")
             num_iters = int(total_num_tokens / (global_batch_size * seq_len))
             total_training_latency = latency_per_iter * num_iters
-            total_training_latency_using_flops = (
-                latency_per_iter_using_flops * num_iters)
+            # total_training_latency_using_flops = (
+            #     latency_per_iter_using_flops * num_iters
+            # )
             logger.info(
                 f"total_training_latency: {round(total_training_latency, 3)} s"
                 f" = {round(total_training_latency/3600/24, 3)} days"
@@ -2590,12 +2630,10 @@ class LLMAnalysis:
             layernorm_dtype_bytes,
             "mlp_activation_quant_bits":
             mlp_activation_quant_bits,
-            "mlp_recompute_gelu":
-            mlp_recompute_gelu,
+            "mlp_recompute_act":
+            mlp_recompute_act,
             "mlp_gated_linear_units":
             self.model_config.mlp_gated_linear_units,
-            "achieved_flops":
-            self.get_TFLOPS_per_gpu(),
             "flops_efficiency":
             self.flops_efficiency,
             "hbm_memory_efficiency":
@@ -2669,9 +2707,8 @@ class LLMAnalysis:
             "latency_per_iter": latency_per_iter,
             "device_tokens_per_sec": device_tokens_per_sec,
             "total_training_latency": total_training_latency,
-            "latency_per_iter_using_flops": latency_per_iter_using_flops,
-            "total_training_latency_using_flops":
-            total_training_latency_using_flops,
+            # "latency_per_iter_using_flops": latency_per_iter_using_flops,
+            # "total_training_latency_using_flops": total_training_latency_using_flops,
             "gpu_hours": gpu_hours,
         })
 
@@ -2825,7 +2862,7 @@ def train(
     mlp_1linear_quant_bits: int = None,
     mlp_gelu_input_quant_bits: int = None,
     mlp_2linear_quant_bits: int = None,
-    mlp_recompute_gelu: bool = False,
+    mlp_recompute_act: bool = False,
     achieved_tflops: float = None,
     flops_efficiency: float = None,
     hbm_memory_efficiency: float = HBM_MEMORY_EFFICIENCY,
@@ -2868,7 +2905,7 @@ def train(
         mlp_gelu_input_quant_bits (int, optional): number of bits to quantize the GELU input activations. Defaults to None.
         mlp_2linear_quant_bits (int, optional): number of bits to quantize the input activations of the second linear layer. Defaults to None.
         mlp_activation_quant_bits (int, optional): number of bits for the quantized MLP activation. Defaults to None.
-        mlp_recompute_gelu (bool, optional): whether to recompute the GELU activation in the MLP backward pass. Defaults to False.
+        mlp_recompute_act (bool, optional): whether to recompute the GELU activation in the MLP backward pass. Defaults to False.
         achieved_tflops (float, optional): achieved TFLOPS per GPU. Defaults to None.
         flops_efficiency (float, optional): flops efficiency, ranging from 0 to 1. Defaults to None.
         hbm_memory_efficiency (float, optional): GPU HBM memory efficiency, ranging from 0 to 1. Defaults to HBM_MEMORY_EFFICIENCY.
@@ -2914,8 +2951,6 @@ def train(
     model_config = get_model_config_by_name(model_name)
     gpu_config = get_gpu_config_by_name(gpu_name)
     dtype_config = get_dtype_config_by_name(dtype_name)
-    # if model_config.moe_num_experts == 1:
-    # ep_size = 1
     parallel_config = ParallelismConfig(
         tp_size=tp_size,
         pp_size=pp_size,
@@ -2957,7 +2992,7 @@ def train(
         mlp_1linear_quant_bits=mlp_1linear_quant_bits,
         mlp_gelu_input_quant_bits=mlp_gelu_input_quant_bits,
         mlp_2linear_quant_bits=mlp_2linear_quant_bits,
-        mlp_recompute_gelu=mlp_recompute_gelu,
+        mlp_recompute_act=mlp_recompute_act,
         output_dir=output_dir,
         output_file_prefix=output_file_prefix,
         output_file_suffix=output_file_suffix,

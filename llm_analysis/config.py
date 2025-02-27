@@ -122,6 +122,15 @@ class ModelConfig:
         # Calculate number of key-value groups
         self.num_key_value_groups = self.n_head / self.num_key_value_heads
 
+        # Check if this is a Mixture of Experts model
+        is_moe_model = False
+        if (self.moe_num_experts or self.moe_num_shared_experts
+                or self.moe_top_k or self.moe_intermediate_size):
+            is_moe_model = True
+
+        if is_moe_model and (self.moe_intermediate_size is None):
+            self.moe_intermediate_size = self.ffn_embed_dim
+
     def __str__(self) -> str:
         """Return a formatted string representation of the configuration."""
         config_dict = asdict(self)
@@ -143,6 +152,8 @@ class ModelConfig:
                  "GQA" for Grouped-Query Attention
         """
         if self.num_key_value_heads == self.n_head:
+            if self.q_lora_rank is not None and self.kv_lora_rank is not None:
+                return "MLA"  # Multi-head Latent Attention
             return "MHA"  # Multi-Head Attention
         elif self.num_key_value_heads == 1:
             return "MQA"  # Multi-Query Attention
@@ -179,6 +190,8 @@ class DtypeConfig:
     weight_bits: int = 16  # number of bits for weight
     activation_bits: int = 16  # number of bits for activation
     embedding_bits: int = 16  # number of bits for the embedding
+    linear_weight_bits: int = 16  # number of bits for weight in linear layer
+    linear_activation_bits: int = 16  # number of bits for activation in linear layer
 
 
 @dataclass
@@ -242,62 +255,78 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
 
     Returns:
         ModelConfig: a dataclass for llm-analysis model config
+
+    Raises:
+        Exception: When configuration values cannot be determined
     """
     if AutoConfig is None:
         logger.warning(
-            f"cannot import AutoConfig from transformers, `transformers` is not installed, HuggingFace will not be available to use for model config retrieval"
+            f"Cannot import AutoConfig from transformers, `transformers` is not installed, HuggingFace will not be available to use for model config retrieval"
         )
         return None
-    hf_config = AutoConfig.from_pretrained(name, trust_remote_code=True)
 
-    model_type = "unknown"
-    if hasattr(hf_config, "model_type"):
-        model_type = hf_config.model_type
+    # Add error handling for failed loading
+    try:
+        hf_config = AutoConfig.from_pretrained(name, trust_remote_code=True)
+    except Exception as e:
+        logger.error(f"Failed to load config from HF for {name}: {str(e)}")
+        raise Exception(
+            f"Could not load model configuration from HF: {str(e)}")
 
+    # Model type extraction with proper default
+    model_type = hf_config.model_type if hasattr(hf_config,
+                                                 "model_type") else "unknown"
+
+    # Extract number of layers
     if hasattr(hf_config, "num_hidden_layers"):
         num_layers = hf_config.num_hidden_layers
     elif hasattr(hf_config, "n_layers"):
         num_layers = hf_config.n_layers
     else:
         raise Exception(
-            "hf config does not have num_hidden_layers or n_layers, check the config.json file"
+            "Could not determine number of layers: missing 'num_hidden_layers' and 'n_layers' attributes"
         )
 
+    # Extract attention heads
     if hasattr(hf_config, "num_attention_heads"):
         n_head = hf_config.num_attention_heads
     elif hasattr(hf_config, "n_heads"):
         n_head = hf_config.n_heads
     else:
         raise Exception(
-            "hf config does not have num_attention_heads or n_heads, check the config.json file"
+            "Could not determine number of attention heads: missing 'num_attention_heads' and 'n_heads' attributes"
         )
 
+    # Extract hidden dimension
     if hasattr(hf_config, "hidden_size"):
         hidden_dim = hf_config.hidden_size
     elif hasattr(hf_config, "d_model"):
         hidden_dim = hf_config.d_model
     else:
         raise Exception(
-            "hf config does not have hidden_size or d_model, check the config.json file"
+            "Could not determine hidden dimension: missing 'hidden_size' and 'd_model' attributes"
         )
 
+    # Extract feed-forward network dimension
     if hasattr(hf_config, "ffn_embed_dim"):
         ffn_embed_dim = hf_config.ffn_embed_dim
     elif hasattr(hf_config, "intermediate_size"):
         ffn_embed_dim = hf_config.intermediate_size
+    elif hasattr(hf_config, "expansion_ratio"):
+        ffn_embed_dim = int(hidden_dim * hf_config.expansion_ratio)
     else:
-        ffn_embed_dim = None
+        raise Exception(
+            "Could not determine ffn dimension: missing 'ffn_embed_dim' or 'intermediate_size' or '        expansion_ratio' attributes"
+        )
 
+    # Check for gated linear units
     mlp_gated_linear_units = False
-    if ffn_embed_dim:
-        model_type = (hf_config.model_type
-                      if hasattr(hf_config, "model_type") else "unknown")
-        expansion_ratio = ffn_embed_dim / hidden_dim
-        if expansion_ratio == 3.5 and model_type == "llama":
-            mlp_gated_linear_units = True
-        elif model_type == "deepseek_v3":
-            mlp_gated_linear_units = True
+    expansion_ratio = ffn_embed_dim / hidden_dim
+    if (expansion_ratio == 3.5
+            and model_type == "llama") or model_type == "deepseek_v3":
+        mlp_gated_linear_units = True
 
+    # Extract MoE experts count, default to None if not found
     if hasattr(hf_config, "moe_num_experts"):
         moe_num_experts = hf_config.moe_num_experts
     elif hasattr(hf_config, "num_local_experts"):
@@ -305,62 +334,59 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
     elif hasattr(hf_config, "n_routed_experts"):
         moe_num_experts = hf_config.n_routed_experts
     else:
-        moe_num_experts = 1
-        logger.info(
-            "hf config does not have moe_num_experts or num_local_experts, setting moe_num_experts = 1 (not MoE model)"
-        )
+        moe_num_experts = None
 
+    # Extract MoE top-k, default to None if not found
     if hasattr(hf_config, "num_experts_per_tok"):
         moe_top_k = hf_config.num_experts_per_tok
     elif hasattr(hf_config, "moe_top_k"):
         moe_top_k = hf_config.moe_top_k
     else:
-        moe_top_k = 1
-        logger.info(
-            "hf config does not have num_experts_per_tok or moe_top_k, setting moe_top_k = 1"
-        )
+        moe_top_k = None
 
+    # Extract MoE shared experts, default to None if not found
     if hasattr(hf_config, "moe_num_shared_experts"):
         moe_num_shared_experts = hf_config.moe_num_shared_experts
     elif hasattr(hf_config, "n_shared_experts"):
         moe_num_shared_experts = hf_config.n_shared_experts
     else:
-        moe_num_shared_experts = 1
-        logger.info(
-            "hf config does not have moe_num_shared_experts or n_shared_experts, setting moe_num_shared_experts = 1"
+        moe_num_shared_experts = None
+
+    # Extract optional attributes
+    first_k_dense_replace = getattr(hf_config, "first_k_dense_replace", None)
+    moe_intermediate_size = getattr(hf_config, "moe_intermediate_size", None)
+    q_lora_rank = getattr(hf_config, "q_lora_rank", None)
+    kv_lora_rank = getattr(hf_config, "kv_lora_rank", None)
+    qk_nope_head_dim = getattr(hf_config, "qk_nope_head_dim", None)
+    qk_rope_head_dim = getattr(hf_config, "qk_rope_head_dim", None)
+
+    # Check for vocab_size with validation
+    if not hasattr(hf_config, "vocab_size"):
+        raise Exception(
+            "Could not determine vocabulary size: missing 'vocab_size' attribute"
         )
-    first_k_dense_replace = None
-    if hasattr(hf_config, "first_k_dense_replace"):
-        first_k_dense_replace = hf_config.first_k_dense_replace
 
-    moe_intermediate_size = None
-    if hasattr(hf_config, "moe_intermediate_size"):
-        moe_intermediate_size = hf_config.moe_intermediate_size
+    vocab_size = hf_config.vocab_size
+    if not isinstance(vocab_size, int) or vocab_size <= 0:
+        raise ValueError(f"Invalid vocabulary size: {vocab_size}")
 
-    q_lora_rank = None
-    if hasattr(hf_config, "q_lora_rank"):
-        q_lora_rank = hf_config.q_lora_rank
-    kv_lora_rank = None
-    if hasattr(hf_config, "kv_lora_rank"):
-        kv_lora_rank = hf_config.kv_lora_rank
-    qk_nope_head_dim = None
-    if hasattr(hf_config, "qk_nope_head_dim"):
-        qk_nope_head_dim = hf_config.qk_nope_head_dim
-    qk_rope_head_dim = None
-    if hasattr(hf_config, "qk_rope_head_dim"):
-        qk_rope_head_dim = hf_config.qk_rope_head_dim
+    # Safe model name canonicalization
+    try:
+        canonical_name = canonical_model_name(name)
+    except Exception as e:
+        logger.warning(f"Failed to get canonical model name: {str(e)}")
+        canonical_name = name
 
     config = ModelConfig(
-        name=canonical_model_name(name),
+        name=canonical_name,
         max_seq_len=(hf_config.max_position_embeddings if hasattr(
             hf_config, "max_position_embeddings") else None),
         num_layers=num_layers,
         n_head=n_head,
         hidden_dim=hidden_dim,
         ffn_embed_dim=ffn_embed_dim,
-        vocab_size=hf_config.vocab_size,
-        model_type=hf_config.model_type
-        if hasattr(hf_config, "model_type") else None,
+        vocab_size=vocab_size,
+        model_type=model_type,
         num_key_value_heads=(hf_config.num_key_value_heads if hasattr(
             hf_config, "num_key_value_heads") else None),
         moe_num_experts=moe_num_experts,
@@ -374,6 +400,7 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
         qk_nope_head_dim=qk_nope_head_dim,
         qk_rope_head_dim=qk_rope_head_dim,
     )
+
     return config
 
 
