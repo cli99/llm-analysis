@@ -96,6 +96,7 @@ class LLMAnalysis:
         hbm_memory_efficiency: float = None,
         intra_node_memory_efficiency: float = INTRA_NODE_MEMORY_EFFICIENCY,
         inter_node_memory_efficiency: float = INTER_NODE_MEMORY_EFFICIENCY,
+        ignore_comm_latency: bool = False,
     ) -> None:
         """LLMAnalysis constructor.
 
@@ -117,6 +118,7 @@ class LLMAnalysis:
         self.dtype_config = dtype_config
         self.intra_node_memory_efficiency = intra_node_memory_efficiency
         self.inter_node_memory_efficiency = inter_node_memory_efficiency
+        self.ignore_comm_latency = ignore_comm_latency
 
         if achieved_memory_bandwidth_GBs and hbm_memory_efficiency:
             logger.info(
@@ -1230,6 +1232,9 @@ class LLMAnalysis:
 
     def get_latency_fwd_per_layer_mlp_moe_alltoall(self, batch_size: int,
                                                    seq_len: int) -> float:
+        if self.ignore_comm_latency:
+            return 0
+
         data_nums = (self.model_config.moe_top_k * batch_size * seq_len *
                      self.model_config.hidden_dim)
         data_bytes = data_nums * self.dtype_config.activation_bits / BITS_PER_BYTE
@@ -1354,7 +1359,7 @@ class LLMAnalysis:
             float: the latency in seconds for a single allreduce communication across the tensor parallel group in the forward pass of a transformer layer
         """
         tp_size = self.parallelism_config.tp_size
-        if tp_size == 1:
+        if tp_size == 1 or self.ignore_comm_latency:
             return 0
 
         elems_per_all_reduce = (2 * batch_size * seq_len *
@@ -1370,6 +1375,8 @@ class LLMAnalysis:
         )
 
     def get_latency_fwd_per_layer_shared_dp_comm(self) -> float:
+        if self.ignore_comm_latency:
+            return 0
         dp_size = self.parallelism_config.dp_size
         ep_size = self.parallelism_config.ep_size
         tp_size = self.parallelism_config.tp_size
@@ -1581,8 +1588,6 @@ class LLMAnalysis:
             ds_zero,
         )
 
-        latency_fwd_layers = latency_fwd_per_layer * num_layers_per_gpu
-
         latency_fwd_input_embedding = self.get_latency_fwd_input_embedding(
             batch_size,
             seq_len,
@@ -1592,16 +1597,29 @@ class LLMAnalysis:
         latency_fwd_output_embedding_loss = self.get_latency_fwd_output_embedding_loss(
             batch_size, seq_len)
 
-        latency_fwd = (latency_fwd_layers + latency_fwd_input_embedding +
-                       latency_fwd_output_embedding_loss)
+        latency_fwd_layers = latency_fwd_per_layer * num_layers_per_gpu
 
-        logger.info("latency_fwd_layers:"
-                    f" {round(latency_fwd_layers*1000, 3)} ms"
-                    f" ({round(latency_fwd_per_layer*1000, 3)} ms x"
-                    f" {num_layers_per_gpu}), latency_fwd_input_embedding:"
-                    f" {round(latency_fwd_input_embedding*1000, 3)} ms,"
-                    " latency_fwd_output_embedding_loss:"
-                    f" {round(latency_fwd_output_embedding_loss*1000, 3)} ms")
+        if self.parallelism_config.pp_size > 1:
+            num_layers_per_gpu_shallowest = int(
+                self.model_config.num_layers / self.parallelism_config.pp_size)
+            latency_fwd_layers_shallowest = (latency_fwd_per_layer *
+                                             num_layers_per_gpu_shallowest)
+            (latency_fwd_layers_shallowest + latency_fwd_input_embedding +
+             latency_fwd_output_embedding_loss)
+            latency_fwd = max(latency_fwd_layers,
+                              latency_fwd_layers_shallowest)
+        else:
+            latency_fwd = (latency_fwd_layers + latency_fwd_input_embedding +
+                           latency_fwd_output_embedding_loss)
+
+            logger.info(
+                "latency_fwd_layers:"
+                f" {round(latency_fwd_layers*1000, 3)} ms"
+                f" ({round(latency_fwd_per_layer*1000, 3)} ms x"
+                f" {num_layers_per_gpu}), latency_fwd_input_embedding:"
+                f" {round(latency_fwd_input_embedding*1000, 3)} ms,"
+                " latency_fwd_output_embedding_loss:"
+                f" {round(latency_fwd_output_embedding_loss*1000, 3)} ms")
 
         logger.info(
             f"latency_fwd: {round(latency_fwd*1000, 3)} ms (layers + input_embedding + output_embedding_loss: "
@@ -1739,11 +1757,12 @@ class LLMAnalysis:
                 "kv_cache_dtype_bytes not specified, setting to the same as"
                 f" the activation data type : {kv_cache_dtype_bytes}")
 
-        num_layers_per_gpu = int(self.model_config.num_layers /
-                                 self.parallelism_config.pp_size)
+        num_layers_per_gpu = int(
+            (self.model_config.num_layers + self.parallelism_config.pp_size -
+             1) / self.parallelism_config.pp_size)
         if self.model_config.num_layers % self.parallelism_config.pp_size:
             logger.info(
-                "num_layers not be divisible by pp_size, taking the floor")
+                "num_layers not be divisible by pp_size, taking the ceiling")
 
         weight_memory_embedding_per_gpu = self.get_memory_embedding(ds_zero)
         (
@@ -2189,8 +2208,9 @@ class LLMAnalysis:
 
         logger.info(f"\n{'Analysis'.center(PRINT_LINE_WIDTH, '-')}")
 
-        num_layers_per_gpu = int(self.model_config.num_layers /
-                                 self.parallelism_config.pp_size)
+        num_layers_per_gpu = int(
+            (self.model_config.num_layers + self.parallelism_config.pp_size -
+             1) / self.parallelism_config.pp_size)
         if self.model_config.num_layers % self.parallelism_config.pp_size:
             logger.info(
                 "num_layers not be divisible by pp_size, taking the floor")
@@ -2748,6 +2768,7 @@ def infer(
     hbm_memory_efficiency: float = None,
     intra_node_memory_efficiency=INTRA_NODE_MEMORY_EFFICIENCY,
     inter_node_memory_efficiency=INTER_NODE_MEMORY_EFFICIENCY,
+    ignore_comm_latency: bool = False,
     cost_per_gpu_hour: float = None,
     output_dir: str = None,
     output_file_prefix: str = "",
@@ -2809,6 +2830,7 @@ def infer(
         hbm_memory_efficiency=hbm_memory_efficiency,
         intra_node_memory_efficiency=intra_node_memory_efficiency,
         inter_node_memory_efficiency=inter_node_memory_efficiency,
+        ignore_comm_latency=ignore_comm_latency,
     )
 
     if analysis.hbm_memory_efficiency > 0.8:
@@ -2869,6 +2891,7 @@ def train(
     intra_node_memory_efficiency=INTRA_NODE_MEMORY_EFFICIENCY,
     inter_node_memory_efficiency=INTER_NODE_MEMORY_EFFICIENCY,
     num_gpus_per_node: int = NUM_GPUS_PER_NODE,
+    ignore_comm_latency: bool = False,
     output_dir: str = None,
     output_file_prefix: str = "",
     output_file_suffix: str = "",
@@ -2970,6 +2993,7 @@ def train(
         inter_node_memory_efficiency=inter_node_memory_efficiency,
         achieved_tflops=achieved_tflops,
         flops_efficiency=flops_efficiency,
+        ignore_comm_latency=ignore_comm_latency,
     )
 
     summary_dict = analysis.training(
