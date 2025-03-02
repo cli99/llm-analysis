@@ -28,7 +28,7 @@ from llm_analysis.config import (DtypeConfig, GPUConfig, ModelConfig,
                                  get_model_config_by_name)
 from llm_analysis.constant import *
 from llm_analysis.logger import logger
-from llm_analysis.utils import _latency_to_string, _num_to_string, within_range
+from llm_analysis.utils import _latency_to_string, _num_to_string
 
 
 @total_ordering
@@ -1857,8 +1857,9 @@ class LLMAnalysis:
         )
 
         if use_kv_cache:
-            if (batch_size_per_gpu *
-                (seq_len + num_tokens_to_generate) < self.get_pivot()):
+            if (batch_size_per_gpu * (seq_len + num_tokens_to_generate) <
+                    self.get_pivot(self.dtype_config.linear_weight_bits,
+                                   self.dtype_config.linear_activation_bits)):
                 logger.warning(
                     "kv_cache is only useful when batch_size *"
                     " (seq+num_tokens_to_generate)"
@@ -2581,22 +2582,22 @@ class LLMAnalysis:
                 f" = {round(total_training_latency/3600/24, 3)} days"
                 f" ({round(latency_per_iter * 1000, 3)} ms x"
                 f" {num_iters} iters)")
-            if self.model_config.moe_num_experts == 1:
-                # dense models
-                estimated_total_training_latency = (
-                    (8 if activation_recomputation
-                     == ActivationRecomputation.FULL else 6) *
-                    self.total_num_params * total_num_tokens /
-                    (total_num_gpus * self.get_TFLOPS_per_gpu() * 1e12))
-                if not within_range(
-                        total_training_latency_using_flops,
-                        estimated_total_training_latency,
-                        0.05,
-                ):
-                    logger.warning(
-                        f"total_training_latency_using_flops ({total_training_latency_using_flops}) is too"
-                        " different from estimated_total_training_latency"
-                        f" ({estimated_total_training_latency})")
+            # if self.model_config.moe_num_experts == 1:
+            #     # dense models
+            #     estimated_total_training_latency = (
+            #         (8 if activation_recomputation
+            #          == ActivationRecomputation.FULL else 6) *
+            #         self.total_num_params * total_num_tokens /
+            #         (total_num_gpus * self.get_TFLOPS_per_gpu(self.dtype_config.linear_weight_bits, self.dtype_config.linear_activation_bits) * 1e12))
+            #     if not within_range(
+            #             total_training_latency_using_flops,
+            #             estimated_total_training_latency,
+            #             0.05,
+            #     ):
+            #         logger.warning(
+            #             f"total_training_latency_using_flops ({total_training_latency_using_flops}) is too"
+            #             " different from estimated_total_training_latency"
+            #             f" ({estimated_total_training_latency})")
 
         else:
             total_training_latency = None
