@@ -4,7 +4,8 @@ from llm_analysis.analysis import (BYTES_FP16, BYTES_FP32,
                                    ActivationRecomputation, DSZeRO,
                                    LLMAnalysis)
 from llm_analysis.config import (DtypeConfig, GPUConfig, ModelConfig,
-                                 ParallelismConfig, get_model_config_by_name)
+                                 ParallelismConfig, get_gpu_config_by_name,
+                                 get_model_config_by_name, list_gpu_configs)
 from llm_analysis.constant import (HBM_MEMORY_EFFICIENCY,
                                    INTER_NODE_MEMORY_EFFICIENCY,
                                    INTRA_NODE_MEMORY_EFFICIENCY,
@@ -12,11 +13,12 @@ from llm_analysis.constant import (HBM_MEMORY_EFFICIENCY,
 
 
 def main():
+
     st.set_page_config(page_title="LLM Analysis", layout="wide")
 
     st.title("LLM Analysis")
 
-    st.header("Training")
+    st.header("Training Analysis")
 
     # Initialize session state with default values if not already set
     if "initialized" not in st.session_state:
@@ -31,10 +33,11 @@ def main():
             st.session_state.vocab_size = default_model.vocab_size
             st.session_state.expansion_ratio = default_model.expansion_ratio
             st.session_state.mlp_gated_linear_units = default_model.mlp_gated_linear_units
-            st.session_state.moe_num_experts = default_model.moe_num_experts or 1
-            st.session_state.moe_top_k = default_model.moe_top_k or 1
-            st.session_state.moe_intermediate_size = default_model.moe_intermediate_size or 0
-            st.session_state.moe_num_shared_experts = default_model.moe_num_shared_experts or 0
+            # Initialize MoE parameters with -1 if not set
+            st.session_state.moe_num_experts = default_model.moe_num_experts if default_model.moe_num_experts is not None else -1
+            st.session_state.moe_top_k = default_model.moe_top_k if default_model.moe_top_k is not None else -1
+            st.session_state.moe_intermediate_size = default_model.moe_intermediate_size if default_model.moe_intermediate_size is not None else -1
+            st.session_state.moe_num_shared_experts = default_model.moe_num_shared_experts if default_model.moe_num_shared_experts is not None else -1
             st.session_state.num_key_value_heads = default_model.num_key_value_heads or default_model.n_head
             st.session_state.num_key_value_groups = default_model.num_key_value_groups or 1
             st.session_state.max_seq_len = default_model.max_seq_len or 4096
@@ -51,10 +54,10 @@ def main():
             st.session_state.vocab_size = 32000
             st.session_state.expansion_ratio = 4.0
             st.session_state.mlp_gated_linear_units = False
-            st.session_state.moe_num_experts = 1
-            st.session_state.moe_top_k = 1
-            st.session_state.moe_intermediate_size = 0
-            st.session_state.moe_num_shared_experts = 0
+            st.session_state.moe_num_experts = -1
+            st.session_state.moe_top_k = -1
+            st.session_state.moe_intermediate_size = -1
+            st.session_state.moe_num_shared_experts = -1
             st.session_state.num_key_value_heads = 32
             st.session_state.num_key_value_groups = 1
             st.session_state.max_seq_len = 4096
@@ -70,16 +73,20 @@ def main():
             "Configuration Mode",
             ["Load from HuggingFace", "Custom Configuration"],
             help=
-            "Choose whether to load a model from HuggingFace or create a custom configuration"
-        )
+            "Choose whether to load a model from HuggingFace or create a custom configuration",
+            horizontal=True)
 
         if config_mode == "Load from HuggingFace":
-            st.markdown(
-                "Enter a model name on HuggingFace (e.g., deepseek-ai/DeepSeek-V3, meta-llama/Llama-3.3-70B-Instruct)"
-            )
-            selected_model = st.text_input("HuggingFace Model Name",
-                                           "deepseek-ai/DeepSeek-V3")
-            load_button = st.button("Load Model Configuration")
+            col_name, col_button = st.columns([0.7, 0.3])
+            with col_name:
+                selected_model = st.text_input(
+                    "HuggingFace Model Name",
+                    "deepseek-ai/DeepSeek-V3",
+                    help=
+                    "e.g., deepseek-ai/DeepSeek-V3, meta-llama/Llama-3.3-70B-Instruct"
+                )
+            with col_button:
+                load_button = st.button("Load Model Configuration")
 
             if load_button:
                 try:
@@ -95,79 +102,87 @@ def main():
                     st.session_state.vocab_size = model_config.vocab_size
                     st.session_state.expansion_ratio = model_config.expansion_ratio
                     st.session_state.mlp_gated_linear_units = model_config.mlp_gated_linear_units
-                    st.session_state.moe_num_experts = model_config.moe_num_experts or 1
-                    st.session_state.moe_top_k = model_config.moe_top_k or 1
-                    st.session_state.moe_intermediate_size = model_config.moe_intermediate_size or 0
-                    st.session_state.moe_num_shared_experts = model_config.moe_num_shared_experts or 0
+                    st.session_state.moe_num_experts = model_config.moe_num_experts if model_config.moe_num_experts is not None else -1
+                    st.session_state.moe_top_k = model_config.moe_top_k if model_config.moe_top_k is not None else -1
+                    st.session_state.moe_intermediate_size = model_config.moe_intermediate_size if model_config.moe_intermediate_size is not None else -1
+                    st.session_state.moe_num_shared_experts = model_config.moe_num_shared_experts if model_config.moe_num_shared_experts is not None else -1
                     st.session_state.num_key_value_heads = model_config.num_key_value_heads or model_config.n_head
                     st.session_state.num_key_value_groups = model_config.num_key_value_groups or 1
                     st.session_state.max_seq_len = model_config.max_seq_len or 4096
+                    # Update MoE state after loading configuration
+                    st.session_state.use_moe = st.session_state.moe_num_experts > 0
                 except Exception as e:
                     st.error(f"Error loading model config: {str(e)}")
                     # Keep existing session state values if loading fails
 
         # Model configuration fields that can be adjusted
-        st.markdown("##### Model Configuration")
         st.session_state.model_name = st.text_input(
             "Model Name", value=st.session_state.model_name)
-        st.session_state.hidden_dim = st.number_input(
-            "Hidden Dimension",
-            value=st.session_state.hidden_dim,
-            step=128,
-            help="Hidden dimension size of the model")
-        ffn_embed_dim = st.number_input(
-            "FFN Dimension",
-            value=int(st.session_state.hidden_dim *
-                      st.session_state.expansion_ratio),
-            step=128,
-            help="Hidden dimension of feed-forward network")
-        # Update expansion ratio based on FFN dimension
-        st.session_state.expansion_ratio = ffn_embed_dim / st.session_state.hidden_dim
 
-        st.session_state.n_head = st.number_input(
-            "Number of Attention Heads",
-            value=st.session_state.n_head,
-            step=1,
-            help="Number of attention heads")
-        st.session_state.num_key_value_heads = st.number_input(
-            "Number of KV Heads",
-            min_value=1,
-            max_value=st.session_state.n_head,
-            value=st.session_state.num_key_value_heads,
-            step=1,
-            help=
-            "Number of key-value heads (must divide number of attention heads)"
-        )
-        if st.session_state.n_head % st.session_state.num_key_value_heads != 0:
-            st.error(
-                f"Number of attention heads ({st.session_state.n_head}) must be divisible by number of KV heads ({st.session_state.num_key_value_heads})"
+        # Create two columns for model configuration values
+        config_col1, config_col2 = st.columns(2)
+
+        with config_col1:
+            st.session_state.hidden_dim = st.number_input(
+                "Hidden Dimension",
+                value=st.session_state.hidden_dim,
+                step=128,
+                help="Hidden dimension size of the model")
+            ffn_embed_dim = st.number_input(
+                "FFN Dimension",
+                value=int(st.session_state.hidden_dim *
+                          st.session_state.expansion_ratio),
+                step=128,
+                help="Hidden dimension of feed-forward network")
+            # Update expansion ratio based on FFN dimension
+            st.session_state.expansion_ratio = ffn_embed_dim / st.session_state.hidden_dim
+
+            st.session_state.n_head = st.number_input(
+                "Number of Attention Heads",
+                value=st.session_state.n_head,
+                step=1,
+                help="Number of attention heads")
+            st.session_state.num_key_value_heads = st.number_input(
+                "Number of KV Heads",
+                min_value=1,
+                max_value=st.session_state.n_head,
+                value=st.session_state.num_key_value_heads,
+                step=1,
+                help=
+                "Number of key-value heads (must divide number of attention heads)"
             )
-        st.session_state.num_key_value_groups = st.session_state.n_head // st.session_state.num_key_value_heads
 
-        st.session_state.num_layers = st.number_input(
-            "Number of Layers",
-            value=st.session_state.num_layers,
-            step=1,
-            help="Number of transformer layers")
-        st.session_state.vocab_size = st.number_input(
-            "Vocabulary Size",
-            value=st.session_state.vocab_size,
-            step=1000,
-            help="Size of the vocabulary")
-        st.session_state.max_seq_len = st.number_input(
-            "Maximum Sequence Length",
-            value=st.session_state.max_seq_len,
-            step=128,
-            help="Maximum sequence length the model can handle")
-        st.session_state.mlp_gated_linear_units = st.checkbox(
-            "MLP Gated Linear Units",
-            value=st.session_state.mlp_gated_linear_units,
-            help="Use gated linear units in MLP layers")
+        with config_col2:
+            if st.session_state.n_head % st.session_state.num_key_value_heads != 0:
+                st.error(
+                    f"Number of attention heads ({st.session_state.n_head}) must be divisible by number of KV heads ({st.session_state.num_key_value_heads})"
+                )
+            st.session_state.num_key_value_groups = st.session_state.n_head // st.session_state.num_key_value_heads
+
+            st.session_state.num_layers = st.number_input(
+                "Number of Layers",
+                value=st.session_state.num_layers,
+                step=1,
+                help="Number of transformer layers")
+            st.session_state.vocab_size = st.number_input(
+                "Vocabulary Size",
+                value=st.session_state.vocab_size,
+                step=1000,
+                help="Size of the vocabulary")
+            st.session_state.max_seq_len = st.number_input(
+                "Maximum Sequence Length",
+                value=st.session_state.max_seq_len,
+                step=128,
+                help="Maximum sequence length the model can handle")
+            st.session_state.mlp_gated_linear_units = st.checkbox(
+                "MLP Gated Linear Units",
+                value=st.session_state.mlp_gated_linear_units,
+                help="Use gated linear units in MLP layers")
 
         # MoE Configuration
         # Store MoE state in session state if not already present
         if "use_moe" not in st.session_state:
-            st.session_state.use_moe = st.session_state.moe_num_experts > 1
+            st.session_state.use_moe = st.session_state.moe_num_experts > 0
 
         # Update use_moe checkbox based on session state
         st.session_state.use_moe = st.checkbox(
@@ -182,52 +197,73 @@ def main():
                 st.session_state.moe_num_experts = st.number_input(
                     "Number of Experts",
                     min_value=1,
-                    value=st.session_state.moe_num_experts,
+                    value=max(1, st.session_state.moe_num_experts),
                     step=1,
                     help="Total number of experts")
                 st.session_state.moe_top_k = st.number_input(
                     "Top-K Experts",
                     min_value=1,
                     max_value=st.session_state.moe_num_experts,
-                    value=min(st.session_state.moe_top_k,
-                              st.session_state.moe_num_experts),
+                    value=max(
+                        1,
+                        min(st.session_state.moe_top_k,
+                            st.session_state.moe_num_experts)),
                     step=1,
                     help="Number of experts to route each token to")
             with moe_col2:
                 st.session_state.moe_num_shared_experts = st.number_input(
                     "Number of Shared Experts",
                     min_value=0,
-                    value=st.session_state.moe_num_shared_experts,
+                    value=max(0, st.session_state.moe_num_shared_experts),
                     step=1,
                     help="Number of experts shared across all groups")
                 st.session_state.moe_intermediate_size = st.number_input(
                     "MoE Intermediate Size",
                     min_value=0,
-                    value=st.session_state.moe_intermediate_size
+                    value=max(0, st.session_state.moe_intermediate_size)
                     if st.session_state.moe_intermediate_size > 0 else
                     ffn_embed_dim,
                     step=128,
                     help="Intermediate size for MoE layers")
         else:
             # Reset MoE parameters when disabled
-            st.session_state.moe_num_experts = 1
-            st.session_state.moe_top_k = 1
-            st.session_state.moe_num_shared_experts = 0
-            st.session_state.moe_intermediate_size = 0
-
-        # Update the MoE state when loading a new model configuration
-        if load_button and 'model_config' in locals():
-            st.session_state.use_moe = (model_config.moe_num_experts or 1) > 1
-            if st.session_state.use_moe:
-                st.session_state.moe_num_experts = model_config.moe_num_experts
-                st.session_state.moe_top_k = model_config.moe_top_k
-                st.session_state.moe_intermediate_size = model_config.moe_intermediate_size or ffn_embed_dim
-                st.session_state.moe_num_shared_experts = model_config.moe_num_shared_experts or 0
+            st.session_state.moe_num_experts = -1
+            st.session_state.moe_top_k = -1
+            st.session_state.moe_num_shared_experts = -1
+            st.session_state.moe_intermediate_size = -1
 
     with col2:
         st.subheader("Hardware Configuration")
+        # Get all available GPU configs and sort them
+        gpu_configs = list_gpu_configs()
+
+        if not gpu_configs:
+            st.error(
+                "No GPU configurations were loaded. Using Custom configuration only."
+            )
+            gpu_configs = []
+
         gpu_name = st.selectbox(
-            "GPU Type", ["A100-80GB", "A100-40GB", "H100-80GB", "Custom"])
+            "GPU Type",
+            gpu_configs + ["Custom"],
+            help=
+            "Select from predefined GPU configurations or create a custom one")
+
+        # Display selected GPU configuration details
+        if gpu_name != "Custom":
+            try:
+                selected_gpu = get_gpu_config_by_name(gpu_name)
+                st.info(f"""Selected GPU Configuration:
+- Memory: {selected_gpu.mem_per_GPU_in_GB} GB
+- HBM Bandwidth: {selected_gpu.hbm_bandwidth_in_GB_per_sec} GB/s
+- Peak FP16: {selected_gpu.peak_fp16_TFLOPS} TFLOPS
+- Peak INT8: {selected_gpu.peak_i8_TFLOPS} TFLOPS
+- Peak INT4: {selected_gpu.peak_i4_TFLOPS} TFLOPS
+- Intra-node Bandwidth: {selected_gpu.intra_node_bandwidth_in_GB_per_sec} GB/s
+- Inter-node Bandwidth: {selected_gpu.inter_node_bandwidth_in_GB_per_sec} GB/s"""
+                        )
+            except Exception as e:
+                st.error(f"Error loading GPU config: {str(e)}")
 
         if gpu_name == "Custom":
             mem_per_GPU_in_GB = st.number_input("Memory per GPU (GB)",
@@ -245,73 +281,62 @@ def main():
             gpu_hbm_bandwidth = st.number_input("GPU HBM Bandwidth (GB/s)",
                                                 value=2039,
                                                 step=1)
+            gpu_config = GPUConfig(
+                name=gpu_name,
+                mem_per_GPU_in_GB=mem_per_GPU_in_GB,
+                peak_fp16_TFLOPS=gpu_flops_16bit,
+                peak_i8_TFLOPS=gpu_flops_8bit,
+                peak_i4_TFLOPS=gpu_flops_4bit,
+                hbm_bandwidth_in_GB_per_sec=gpu_hbm_bandwidth,
+                intra_node_bandwidth_in_GB_per_sec=300,  # Default value
+                intra_node_min_message_latency=0.00001  # Default value
+            )
         else:
-            # Pre-defined GPU configs
-            gpu_configs = {
-                "A100-80GB": {
-                    "mem": 80,
-                    "flops_16bit": 312,
-                    "flops_8bit": 624,
-                    "flops_4bit": 1248,
-                    "bandwidth": 2039
-                },
-                "A100-40GB": {
-                    "mem": 40,
-                    "flops_16bit": 312,
-                    "flops_8bit": 624,
-                    "flops_4bit": 1248,
-                    "bandwidth": 1555
-                },
-                "H100-80GB": {
-                    "mem": 80,
-                    "flops_16bit": 989,
-                    "flops_8bit": 1979,
-                    "flops_4bit": 3958,
-                    "bandwidth": 3350
-                },
-            }
-            selected_gpu = gpu_configs[gpu_name]
-            mem_per_GPU_in_GB = selected_gpu["mem"]
-            gpu_flops_16bit = selected_gpu["flops_16bit"]
-            gpu_flops_8bit = selected_gpu["flops_8bit"]
-            gpu_flops_4bit = selected_gpu["flops_4bit"]
-            gpu_hbm_bandwidth = selected_gpu["bandwidth"]
+            gpu_config = get_gpu_config_by_name(gpu_name)
+            mem_per_GPU_in_GB = gpu_config.mem_per_GPU_in_GB
+            gpu_flops_16bit = gpu_config.peak_fp16_TFLOPS
+            gpu_flops_8bit = gpu_config.peak_i8_TFLOPS
+            gpu_flops_4bit = gpu_config.peak_i4_TFLOPS
+            gpu_hbm_bandwidth = gpu_config.hbm_bandwidth_in_GB_per_sec
 
         st.subheader("Parallelism Configuration")
-        total_num_gpus = st.number_input("Total Number of GPUs",
-                                         value=8,
-                                         min_value=1,
-                                         step=1)
-        tp_size = st.number_input("Tensor Parallelism Size",
-                                  value=1,
-                                  min_value=1,
-                                  step=1)
-        pp_size = st.number_input("Pipeline Parallelism Size",
-                                  value=1,
-                                  min_value=1,
-                                  step=1)
-        dp_size = st.number_input("Data Parallelism Size",
-                                  value=8,
-                                  min_value=1,
-                                  step=1)
-        ep_size = st.number_input("Expert Parallelism Size",
-                                  value=1,
-                                  min_value=1,
-                                  step=1)
-        sp_size = st.number_input("Sequence Parallelism Size",
-                                  value=1,
-                                  min_value=1,
-                                  step=1)
+        para_col1, para_col2 = st.columns(2)
+        with para_col1:
+            total_num_gpus = st.number_input("Total Number of GPUs",
+                                             value=8,
+                                             min_value=1,
+                                             step=1)
+            tp_size = st.number_input("Tensor Parallelism Size",
+                                      value=1,
+                                      min_value=1,
+                                      step=1)
+            pp_size = st.number_input("Pipeline Parallelism Size",
+                                      value=1,
+                                      min_value=1,
+                                      step=1)
+        with para_col2:
+            dp_size = st.number_input("Data Parallelism Size",
+                                      value=8,
+                                      min_value=1,
+                                      step=1)
+            ep_size = st.number_input("Expert Parallelism Size",
+                                      value=1,
+                                      min_value=1,
+                                      step=1)
+            sp_size = st.number_input("Sequence Parallelism Size",
+                                      value=1,
+                                      min_value=1,
+                                      step=1)
 
         st.subheader("Data Type Configuration")
         dtype_name = st.selectbox("Data Type",
                                   ["FP16", "BF16", "FP8", "INT8", "INT4"])
 
-    # Training parameters
-    st.subheader("Training Setup")
-    col3, col4 = st.columns(2)
+    # Training Setup section (moved outside of columns)
+    st.header("Training Setup")
+    train_col1, train_col2 = st.columns(2)
 
-    with col3:
+    with train_col1:
         batch_size_per_gpu = st.number_input("Batch Size per GPU",
                                              value=1,
                                              min_value=1,
@@ -330,7 +355,12 @@ def main():
                                            step=10.0)
         total_num_tokens *= 1_000_000_000  # Convert to actual token count
 
-    with col4:
+        fwd_prefetch = st.checkbox("Forward Prefetch", value=True)
+        bwd_prefetch = st.checkbox("Backward Prefetch", value=True)
+        mlp_recompute_act = st.checkbox("MLP Recompute Activation",
+                                        value=False)
+
+    with train_col2:
         activation_recomputation = st.selectbox("Activation Recomputation", [
             "None", "Attention Compute", "Attention", "Norm-Attention-Norm",
             "Full"
@@ -355,75 +385,54 @@ def main():
         layernorm_dtype = st.selectbox("LayerNorm Data Type", ["FP16", "FP32"])
         layernorm_dtype_bytes = BYTES_FP16 if layernorm_dtype == "FP16" else BYTES_FP32
 
+        master_weights_dtype = st.selectbox("Master Weights Data Type",
+                                            ["FP16", "FP32"])
+        master_weights_dtype_bytes = BYTES_FP16 if master_weights_dtype == "FP16" else BYTES_FP32
+
         flash_attn = st.checkbox("Use Flash Attention", value=True)
         softmax_dropout = st.checkbox("Softmax Dropout", value=False)
 
-    # Advanced training settings
-    with st.expander("Advanced Training Settings"):
-        col5, col6 = st.columns(2)
+        flops_efficiency = st.slider("FLOPS Efficiency",
+                                     min_value=0.0,
+                                     max_value=1.0,
+                                     value=0.5,
+                                     step=0.05)
+        hbm_memory_efficiency_value = 0.8  # Default fallback value
+        if isinstance(HBM_MEMORY_EFFICIENCY,
+                      (int, float)) and 0 <= HBM_MEMORY_EFFICIENCY <= 1:
+            hbm_memory_efficiency_value = float(HBM_MEMORY_EFFICIENCY)
+        hbm_memory_efficiency = st.slider("HBM Memory Efficiency",
+                                          min_value=0.0,
+                                          max_value=1.0,
+                                          value=hbm_memory_efficiency_value,
+                                          step=0.05)
+        intra_node_efficiency_value = 0.7  # Default fallback value
+        if isinstance(INTRA_NODE_MEMORY_EFFICIENCY,
+                      (int, float)) and 0 <= INTRA_NODE_MEMORY_EFFICIENCY <= 1:
+            intra_node_efficiency_value = float(INTRA_NODE_MEMORY_EFFICIENCY)
 
-        with col5:
-            fwd_prefetch = st.checkbox("Forward Prefetch", value=True)
-            bwd_prefetch = st.checkbox("Backward Prefetch", value=True)
-            mlp_recompute_act = st.checkbox("MLP Recompute Activation",
-                                            value=False)
+        intra_node_memory_efficiency = st.slider(
+            "Intra-Node Memory Efficiency",
+            min_value=0.0,
+            max_value=1.0,
+            value=intra_node_efficiency_value,
+            step=0.05)
 
-            master_weights_dtype = st.selectbox("Master Weights Data Type",
-                                                ["FP16", "FP32"])
-            master_weights_dtype_bytes = BYTES_FP16 if master_weights_dtype == "FP16" else BYTES_FP32
+        inter_node_efficiency_value = 0.6  # Default fallback value
+        if isinstance(INTER_NODE_MEMORY_EFFICIENCY,
+                      (int, float)) and 0 <= INTER_NODE_MEMORY_EFFICIENCY <= 1:
+            inter_node_efficiency_value = float(INTER_NODE_MEMORY_EFFICIENCY)
 
-        with col6:
-            flops_efficiency = st.slider("FLOPS Efficiency",
-                                         min_value=0.0,
-                                         max_value=1.0,
-                                         value=0.5,
-                                         step=0.05)
-            hbm_memory_efficiency_value = 0.8  # Default fallback value
-            if isinstance(HBM_MEMORY_EFFICIENCY,
-                          (int, float)) and 0 <= HBM_MEMORY_EFFICIENCY <= 1:
-                hbm_memory_efficiency_value = float(HBM_MEMORY_EFFICIENCY)
-            hbm_memory_efficiency = st.slider(
-                "HBM Memory Efficiency",
-                min_value=0.0,
-                max_value=1.0,
-                value=hbm_memory_efficiency_value,
-                step=0.05)
-            intra_node_efficiency_value = 0.7  # Default fallback value
-            if isinstance(
-                    INTRA_NODE_MEMORY_EFFICIENCY,
-                (int, float)) and 0 <= INTRA_NODE_MEMORY_EFFICIENCY <= 1:
-                intra_node_efficiency_value = float(
-                    INTRA_NODE_MEMORY_EFFICIENCY)
-
-            intra_node_memory_efficiency = st.slider(
-                "Intra-Node Memory Efficiency",
-                min_value=0.0,
-                max_value=1.0,
-                value=intra_node_efficiency_value,
-                step=0.05)
-
-            inter_node_efficiency_value = 0.6  # Default fallback value
-            if isinstance(
-                    INTER_NODE_MEMORY_EFFICIENCY,
-                (int, float)) and 0 <= INTER_NODE_MEMORY_EFFICIENCY <= 1:
-                inter_node_efficiency_value = float(
-                    INTER_NODE_MEMORY_EFFICIENCY)
-
-            inter_node_memory_efficiency = st.slider(
-                "Inter-Node Memory Efficiency",
-                min_value=0.0,
-                max_value=1.0,
-                value=inter_node_efficiency_value,
-                step=0.05)
-            num_gpus_per_node = st.number_input("Number of GPUs per Node",
-                                                value=NUM_GPUS_PER_NODE,
-                                                min_value=1,
-                                                step=1)
-
-    # Output directory
-    output_dir = st.text_input("Output Directory (optional)", "")
-    output_file_prefix = st.text_input("Output File Prefix (optional)", "")
-    output_file_suffix = st.text_input("Output File Suffix (optional)", "")
+        inter_node_memory_efficiency = st.slider(
+            "Inter-Node Memory Efficiency",
+            min_value=0.0,
+            max_value=1.0,
+            value=inter_node_efficiency_value,
+            step=0.05)
+        num_gpus_per_node = st.number_input("Number of GPUs per Node",
+                                            value=NUM_GPUS_PER_NODE,
+                                            min_value=1,
+                                            step=1)
 
     # Run analysis button
     if st.button("Run Training Analysis"):
@@ -537,11 +546,9 @@ def main():
                 flash_attn=flash_attn,
                 softmax_dropout=softmax_dropout,
                 mlp_recompute_act=mlp_recompute_act,
-                output_dir=output_dir if output_dir else None,
-                output_file_prefix=output_file_prefix
-                if output_file_prefix else None,
-                output_file_suffix=output_file_suffix
-                if output_file_suffix else None)
+                output_dir=None,
+                output_file_prefix=None,
+                output_file_suffix=None)
 
         # Display results
         st.subheader("Training Analysis Results")

@@ -410,21 +410,37 @@ def get_model_config_from_hf(name: str, ) -> ModelConfig:
 def read_configs(config_dir_name: str, type="model") -> dict:
     """Read configs from a directory."""
     configs = {}
-    for filename in os.listdir(config_dir_name):
+    logger.info(f"Reading {type} configs from directory: {config_dir_name}")
+
+    if not os.path.exists(config_dir_name):
+        logger.error(f"Config directory does not exist: {config_dir_name}")
+        return configs
+
+    config_files = os.listdir(config_dir_name)
+    logger.info(f"Found {len(config_files)} files in {config_dir_name}")
+
+    for filename in config_files:
         filepath = os.path.join(config_dir_name, filename)
-        with open(filepath, "r") as f:
-            config_json = json.load(f)
-            if type == "model":
-                config = ModelConfig(**config_json)
-            elif type == "gpu":
-                config = GPUConfig(**config_json)
-            elif type == "dtype":
-                config = DtypeConfig(**config_json)
-            else:
-                assert False, f"unknown config type when reading: {type}"
-            if config.name not in configs:
-                configs[config.name] = config
-    logger.info(f"Loaded {len(configs)} configs from {config_dir_name}")
+        logger.info(f"Reading config file: {filepath}")
+        try:
+            with open(filepath, "r") as f:
+                config_json = json.load(f)
+                if type == "model":
+                    config = ModelConfig(**config_json)
+                elif type == "gpu":
+                    config = GPUConfig(**config_json)
+                elif type == "dtype":
+                    config = DtypeConfig(**config_json)
+                else:
+                    assert False, f"unknown config type when reading: {type}"
+                if config.name not in configs:
+                    configs[config.name] = config
+        except Exception as e:
+            logger.error(f"Error reading config file {filepath}: {str(e)}")
+
+    logger.info(
+        f"Successfully loaded {len(configs)} {type} configs from {config_dir_name}"
+    )
     return configs
 
 
@@ -481,19 +497,27 @@ def get_hf_models_by_type_and_task(
 def populate_model_and_gpu_configs() -> None:
     """Populate model, gpu, and data type configs from the pre-defined json files."""
     global model_configs, gpu_configs, dtype_configs
-    model_configs = read_configs(Path(__file__).parent /
-                                 Path(MODEL_CONFIG_DIR_NAME),
-                                 type="model")
-    gpu_configs = read_configs(Path(__file__).parent /
-                               Path(GPU_CONFIG_DIR_NAME),
-                               type="gpu")
 
-    dtype_configs = read_configs(Path(__file__).parent /
-                                 Path(DTYPE_CONFIG_DIR_NAME),
-                                 type="dtype")
+    logger.info("Starting to populate configs...")
+
+    # Get the absolute paths
+    base_path = Path(__file__).parent
+    model_path = base_path / MODEL_CONFIG_DIR_NAME
+    gpu_path = base_path / GPU_CONFIG_DIR_NAME
+    dtype_path = base_path / DTYPE_CONFIG_DIR_NAME
+
     logger.info(
-        f"Populated {len(model_configs)} model configs, {len(gpu_configs)} gpu configs, {len(dtype_configs)} dtype configs"
+        f"Using paths:\n  Models: {model_path}\n  GPUs: {gpu_path}\n  Dtypes: {dtype_path}"
     )
+
+    model_configs = read_configs(model_path, type="model")
+    gpu_configs = read_configs(gpu_path, type="gpu")
+    dtype_configs = read_configs(dtype_path, type="dtype")
+
+    logger.info(f"Config population complete:\n"
+                f"  - {len(model_configs)} model configs\n"
+                f"  - {len(gpu_configs)} GPU configs\n"
+                f"  - {len(dtype_configs)} dtype configs")
 
 
 def list_model_configs() -> None:
@@ -501,9 +525,17 @@ def list_model_configs() -> None:
     logger.info(model_configs.keys())
 
 
-def list_gpu_configs() -> None:
-    """List all predefined gpu configs."""
-    logger.info(gpu_configs.keys())
+def list_gpu_configs() -> list:
+    """List all predefined gpu configs.
+
+    Returns:
+        list: List of available GPU config names
+    """
+    if not gpu_configs:
+        logger.warning("No GPU configs loaded")
+        return []
+    logger.info(f"Available GPU configs: {list(gpu_configs.keys())}")
+    return list(gpu_configs.keys())
 
 
 def list_dtype_configs() -> None:
