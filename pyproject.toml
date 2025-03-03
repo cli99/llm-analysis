@@ -10,6 +10,7 @@ packages = [{ include = "llm_analysis" }]
 [tool.poetry.dependencies]
 python = ">=3.8"
 fire = "^0.5.0"
+streamlit = "^1.32.0"
 # huggingface-hub = "^0.14.1"
 # transformers = "^4.28.1"
 

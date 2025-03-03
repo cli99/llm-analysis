@@ -120,7 +120,10 @@ class ModelConfig:
                 f"num_key_value_heads ({self.num_key_value_heads})")
 
         # Calculate number of key-value groups
-        self.num_key_value_groups = self.n_head / self.num_key_value_heads
+        if self.n_head % self.num_key_value_heads == 0:
+            self.num_key_value_groups = self.n_head // self.num_key_value_heads
+        else:
+            assert False, "num_key_value_heads must be divisible by n_head"
 
         # Check if this is a Mixture of Experts model
         is_moe_model = False
