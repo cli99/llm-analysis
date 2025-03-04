@@ -3,7 +3,6 @@ from io import StringIO
 
 import plotly.graph_objects as go
 import streamlit as st
-import streamlit.components.v1 as components
 
 from llm_analysis.analysis import (BYTES_FP16, BYTES_FP32,
                                    ActivationRecomputation, DSZeRO,
@@ -1123,69 +1122,6 @@ def main():
     with st.expander("Debug Logs", expanded=False):
         st.text(log_output.getvalue())
 
-    show_print_button = """
-        <script>
-            function print_page(obj) {
-                // Hide button during print
-                obj.style.display = "none";
-
-                // Set optimal print settings
-                const style = document.createElement('style');
-                style.textContent = `
-                    @page {
-                        size: landscape;
-                        margin: 1cm;
-                    }
-                    @media print {
-                        html, body {
-                            height: auto !important;
-                            overflow: visible !important;
-                            -webkit-print-color-adjust: exact !important;
-                            print-color-adjust: exact !important;
-                        }
-                    }
-                `;
-                document.head.appendChild(style);
-
-                // Wait for charts to finish rendering and handle print
-                setTimeout(() => {
-                    // Force all charts to proper dimensions before printing
-                    const charts = document.querySelectorAll('.js-plotly-plot');
-                    charts.forEach(chart => {
-                        if (chart && chart.layout) {
-                            Plotly.relayout(chart, {
-                                'autosize': true,
-                                'width': null,
-                                'height': 400
-                            });
-                        }
-                    });
-
-                    // Print after a short delay to ensure charts are resized
-                    setTimeout(() => {
-                        parent.window.print();
-                        document.head.removeChild(style);
-                        obj.style.display = "block";
-                    }, 200);
-                }, 500);
-            }
-        </script>
-        <button style="
-            padding: 0.5rem 1rem;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin: 1rem 0;
-            font-size: 1rem;
-            display: block;
-        " onclick="print_page(this)">
-            Export to PDF (Landscape)
-        </button>
-        """
-    components.html(show_print_button)
-
 
 def get_pie_chart_layout():
     return dict(showlegend=True,
@@ -1198,7 +1134,6 @@ def get_pie_chart_layout():
                             borderwidth=0,
                             font=dict(size=14)),
                 height=400,
-                margin=dict(t=30, l=0, r=0, b=80),
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)')
 
