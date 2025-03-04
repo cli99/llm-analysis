@@ -21,7 +21,7 @@ def main():
 
     st.set_page_config(page_title="LLM Analysis", layout="wide")
 
-    # Add custom CSS and JavaScript for theme detection and chart styling
+    # Add custom CSS for print layout
     st.markdown("""
         <style>
         .stMetric [data-testid="stMetricValue"] {
@@ -30,79 +30,76 @@ def main():
 
         /* Print-specific styles */
         @media print {
-            /* Ensure full width and proper scaling */
-            @page {
-                size: landscape;
-                margin: 1cm;
+            /* Ensure content scales properly */
+            body {
+                width: 100%;
+                margin: 0;
+                padding: 0;
             }
 
-            /* Make sure content fits width */
-            .main > div {
-                width: 100% !important;
+            /* Preserve Streamlit's layout structure */
+            .main .block-container {
+                max-width: none !important;
                 padding: 0 !important;
             }
 
-            /* Adjust column layouts */
-            [data-testid="column"] {
-                width: 100% !important;
-                flex: 1 1 auto !important;
-                min-width: 0 !important;
+            /* Preserve multi-column layout */
+            div[data-testid="column"] {
+                display: table-cell !important;
+                width: 33.33% !important;
+                padding: 0.5cm !important;
+                vertical-align: top !important;
             }
 
-            /* Hide unnecessary elements */
+            div[data-testid="stHorizontalBlock"] {
+                display: table !important;
+                width: 100% !important;
+                table-layout: fixed !important;
+            }
+
+            /* Ensure metrics are visible and properly sized */
+            .stMetric {
+                break-inside: avoid;
+                margin-bottom: 0.5cm;
+            }
+
+            /* Hide UI elements not needed in print */
             .stButton,
             button[kind="secondary"],
             .stSpinner,
             .stSelectbox,
-            .stDownloadButton {
+            .stDownloadButton,
+            .stToolbar {
                 display: none !important;
             }
 
-            /* Ensure charts are visible */
+            /* Ensure charts print properly */
             .js-plotly-plot {
                 break-inside: avoid;
                 page-break-inside: avoid;
-                height: auto !important;
+                margin: 0.5cm 0;
                 width: 100% !important;
             }
 
-            /* Fix chart legends */
+            /* Keep chart legends visible */
             .legend {
                 display: block !important;
                 visibility: visible !important;
                 opacity: 1 !important;
             }
 
-            /* Ensure plotly SVG elements are visible */
+            /* Ensure SVG elements maintain proper dimensions */
             svg.main-svg {
-                height: 400px !important;
+                max-height: 400px !important;
+                width: 100% !important;
+            }
+
+            /* Ensure proper page breaks */
+            .element-container {
+                break-inside: avoid;
             }
         }
         </style>
-
-        <script>
-            // Function to check if dark mode is enabled
-            function isDarkMode() {
-                return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-            }
-
-            // Function to update chart text colors
-            function updateChartColors() {
-                const charts = document.querySelectorAll('.js-plotly-plot');
-                const textColor = isDarkMode() ? 'white' : 'black';
-
-                charts.forEach(chart => {
-                    const texts = chart.querySelectorAll('.legend text, .gtitle, .xtitle, .ytitle, .pie-label');
-                    texts.forEach(text => {
-                        text.style.fill = textColor;
-                    });
-                });
-            }
-
-            // Update colors initially and when theme changes
-            updateChartColors();
-            window.matchMedia('(prefers-color-scheme: dark)').addListener(updateChartColors);
-        </script>
     """,
                 unsafe_allow_html=True)
 
@@ -1031,22 +1028,7 @@ def main():
             activation_mem = results.get('activation_memory_per_gpu',
                                          0) / (1024**3)
 
-            # Theme detection component
-            theme_script = """
-                <script>
-                    window.addEventListener('load', function() {
-                        // Check if the Streamlit theme is dark
-                        const isDark = document.querySelector('.stApp').classList.contains('dark');
-                        const color = isDark ? 'white' : 'black';
-
-                        // Store the color in a global variable
-                        window.streamlitThemeColor = color;
-                    });
-                </script>
-            """
-            st.components.v1.html(theme_script, height=0)
-
-            # Use a consistent color that will work in both themes
+            # Memory Distribution pie chart
             fig = go.Figure(data=[
                 go.Pie(
                     labels=['Weights', 'Optimizer State', 'Activations'],
@@ -1064,23 +1046,7 @@ def main():
                     )  # Use white text for better contrast with pie colors
                 )
             ])
-
-            fig.update_layout(
-                showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=-0.2,
-                    xanchor="center",
-                    x=0.5,
-                    bgcolor='rgba(0,0,0,0)',  # Transparent background
-                    borderwidth=0,  # Remove border
-                    font=dict(size=14)
-                ),  # Let Plotly handle legend color automatically
-                height=400,
-                margin=dict(t=30, l=0, r=0, b=80),
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)')
+            fig.update_layout(**get_pie_chart_layout())
             st.plotly_chart(fig, use_container_width=True)
 
         # Latency Summary
@@ -1149,23 +1115,7 @@ def main():
                     )  # Use white text for better contrast with pie colors
                 )
             ])
-
-            fig.update_layout(
-                showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=-0.2,
-                    xanchor="center",
-                    x=0.5,
-                    bgcolor='rgba(0,0,0,0)',  # Transparent background
-                    borderwidth=0,  # Remove border
-                    font=dict(size=14)
-                ),  # Let Plotly handle legend color automatically
-                height=400,
-                margin=dict(t=30, l=0, r=0, b=80),
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)')
+            fig.update_layout(**get_pie_chart_layout())
             st.plotly_chart(fig, use_container_width=True)
 
     # Add debug window at the bottom
@@ -1186,15 +1136,37 @@ def main():
                         size: landscape;
                         margin: 1cm;
                     }
+                    @media print {
+                        html, body {
+                            height: auto !important;
+                            overflow: visible !important;
+                            -webkit-print-color-adjust: exact !important;
+                            print-color-adjust: exact !important;
+                        }
+                    }
                 `;
                 document.head.appendChild(style);
 
-                // Wait for any charts to finish rendering
+                // Wait for charts to finish rendering and handle print
                 setTimeout(() => {
-                    parent.window.print();
-                    document.head.removeChild(style);
-                    // Show button again after printing
-                    obj.style.display = "block";
+                    // Force all charts to proper dimensions before printing
+                    const charts = document.querySelectorAll('.js-plotly-plot');
+                    charts.forEach(chart => {
+                        if (chart && chart.layout) {
+                            Plotly.relayout(chart, {
+                                'autosize': true,
+                                'width': null,
+                                'height': 400
+                            });
+                        }
+                    });
+
+                    // Print after a short delay to ensure charts are resized
+                    setTimeout(() => {
+                        parent.window.print();
+                        document.head.removeChild(style);
+                        obj.style.display = "block";
+                    }, 200);
                 }, 500);
             }
         </script>
@@ -1213,6 +1185,22 @@ def main():
         </button>
         """
     components.html(show_print_button)
+
+
+def get_pie_chart_layout():
+    return dict(showlegend=True,
+                legend=dict(orientation="h",
+                            yanchor="bottom",
+                            y=-0.2,
+                            xanchor="center",
+                            x=0.5,
+                            bgcolor='rgba(0,0,0,0)',
+                            borderwidth=0,
+                            font=dict(size=14)),
+                height=400,
+                margin=dict(t=30, l=0, r=0, b=80),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)')
 
 
 if __name__ == "__main__":
