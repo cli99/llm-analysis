@@ -193,8 +193,14 @@ class DtypeConfig:
     weight_bits: int = 16  # number of bits for weight
     activation_bits: int = 16  # number of bits for activation
     embedding_bits: int = 16  # number of bits for the embedding
-    linear_weight_bits: int = 16  # number of bits for weight in linear layer
-    linear_activation_bits: int = 16  # number of bits for activation in linear layer
+    linear_weight_bits: int | None = None  # number of bits for weight in linear layer
+    linear_activation_bits: int | None = None  # number of bits for activation in linear layer
+
+    def __post_init__(self):
+        if self.linear_weight_bits is None:
+            self.linear_weight_bits = self.weight_bits
+        if self.linear_activation_bits is None:
+            self.peak_i4_TFLOPS = self.activation_bits
 
 
 @dataclass
@@ -540,7 +546,11 @@ def list_gpu_configs() -> list:
 
 def list_dtype_configs() -> None:
     """List all predefined data type configs."""
-    logger.info(dtype_configs.keys())
+    if not dtype_configs:
+        logger.warning("No dtype configs loaded")
+        return []
+    logger.info(f"Available dtype configs: {list(dtype_configs.keys())}")
+    return list(dtype_configs.keys())
 
 
 def get_model_config_by_name(name_or_path: str) -> ModelConfig:

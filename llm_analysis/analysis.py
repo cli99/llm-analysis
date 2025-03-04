@@ -228,6 +228,7 @@ class LLMAnalysis:
             assert (higher_bits == 16
                     ), "weight_bits and activation_bits must be 4, 8, or 16"
             gemm_TFOPS = self.gpu_config.peak_fp16_TFLOPS
+        print('XXXXX', self.gpu_config)
         return gemm_TFOPS * self.flops_efficiency
 
     def get_pivot(self, wbits, abits) -> float:
@@ -1198,6 +1199,8 @@ class LLMAnalysis:
 
         attention_projection_flops, attention_compute_flops = (
             self.get_num_flops_fwd_per_layer_attn(batch_size, seq_len))
+        assert tp_size != 0, "tp_size must be greater than 0"
+        print('XXXXX', self.dtype_config)
         compute_latency = (
             attention_projection_flops / tp_size / (self.get_TFLOPS_per_gpu(
                 self.dtype_config.linear_weight_bits,
@@ -2535,12 +2538,13 @@ class LLMAnalysis:
         elif activation_recomputation == ActivationRecomputation.ATTN:
             latency_recompute = num_layers_per_gpu * latency_fwd_per_layer_attn_compute
         elif activation_recomputation == ActivationRecomputation.ATTN_COMPUTE:
-            latency_recompute = (num_layers_per_gpu *
-                                 self.get_num_flops_total_attn_compute(
-                                     batch_size_per_gpu, seq_len) /
-                                 ((self.parallelism_config.tp_size *
-                                   self.parallelism_config.pp_size) *
-                                  self.get_TFLOPS_per_gpu() * 1e12))
+            latency_recompute = (
+                num_layers_per_gpu * self.get_num_flops_total_attn_compute(
+                    batch_size_per_gpu, seq_len) /
+                ((self.parallelism_config.tp_size *
+                  self.parallelism_config.pp_size) * self.get_TFLOPS_per_gpu(
+                      self.dtype_config.weight_bits,
+                      self.dtype_config.activation_bits) * 1e12))
         elif activation_recomputation == ActivationRecomputation.NONE:
             latency_recompute = 0
 
