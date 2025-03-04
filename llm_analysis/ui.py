@@ -1031,6 +1031,22 @@ def main():
             activation_mem = results.get('activation_memory_per_gpu',
                                          0) / (1024**3)
 
+            # Theme detection component
+            theme_script = """
+                <script>
+                    window.addEventListener('load', function() {
+                        // Check if the Streamlit theme is dark
+                        const isDark = document.querySelector('.stApp').classList.contains('dark');
+                        const color = isDark ? 'white' : 'black';
+
+                        // Store the color in a global variable
+                        window.streamlitThemeColor = color;
+                    });
+                </script>
+            """
+            st.components.v1.html(theme_script, height=0)
+
+            # Use a consistent color that will work in both themes
             fig = go.Figure(data=[
                 go.Pie(
                     labels=['Weights', 'Optimizer State', 'Activations'],
@@ -1043,6 +1059,9 @@ def main():
                     hole=0.4,
                     marker=dict(colors=['#2ecc71', '#3498db', '#e74c3c']),
                     name="",  # This removes the trace_0 prefix
+                    textfont=dict(
+                        color="#ffffff"
+                    )  # Use white text for better contrast with pie colors
                 )
             ])
 
@@ -1056,13 +1075,12 @@ def main():
                     x=0.5,
                     bgcolor='rgba(0,0,0,0)',  # Transparent background
                     borderwidth=0,  # Remove border
-                    font=dict(size=14, )),
+                    font=dict(size=14)
+                ),  # Let Plotly handle legend color automatically
                 height=400,
                 margin=dict(t=30, l=0, r=0, b=80),
                 paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict()  # Global font color
-            )
+                plot_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig, use_container_width=True)
 
         # Latency Summary
@@ -1126,6 +1144,9 @@ def main():
                         '#e74c3c'
                     ]),
                     name="",  # This removes the trace_0 prefix
+                    textfont=dict(
+                        color="#ffffff"
+                    )  # Use white text for better contrast with pie colors
                 )
             ])
 
@@ -1139,13 +1160,12 @@ def main():
                     x=0.5,
                     bgcolor='rgba(0,0,0,0)',  # Transparent background
                     borderwidth=0,  # Remove border
-                    font=dict(size=14, )),
+                    font=dict(size=14)
+                ),  # Let Plotly handle legend color automatically
                 height=400,
                 margin=dict(t=30, l=0, r=0, b=80),
                 paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict()  # Global font color
-            )
+                plot_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig, use_container_width=True)
 
     # Add debug window at the bottom
@@ -1156,6 +1176,7 @@ def main():
     show_print_button = """
         <script>
             function print_page(obj) {
+                // Hide button during print
                 obj.style.display = "none";
 
                 // Set optimal print settings
@@ -1172,6 +1193,8 @@ def main():
                 setTimeout(() => {
                     parent.window.print();
                     document.head.removeChild(style);
+                    // Show button again after printing
+                    obj.style.display = "block";
                 }, 500);
             }
         </script>
@@ -1184,6 +1207,7 @@ def main():
             cursor: pointer;
             margin: 1rem 0;
             font-size: 1rem;
+            display: block;
         " onclick="print_page(this)">
             Export to PDF (Landscape)
         </button>
