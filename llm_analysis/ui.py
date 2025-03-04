@@ -3,6 +3,7 @@ from io import StringIO
 
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from llm_analysis.analysis import (BYTES_FP16, BYTES_FP32,
                                    ActivationRecomputation, DSZeRO,
@@ -20,13 +21,88 @@ def main():
 
     st.set_page_config(page_title="LLM Analysis", layout="wide")
 
-    # Add custom CSS for metric values
+    # Add custom CSS and JavaScript for theme detection and chart styling
     st.markdown("""
         <style>
         .stMetric [data-testid="stMetricValue"] {
             font-size: 1rem;
         }
+
+        /* Print-specific styles */
+        @media print {
+            /* Ensure full width and proper scaling */
+            @page {
+                size: landscape;
+                margin: 1cm;
+            }
+
+            /* Make sure content fits width */
+            .main > div {
+                width: 100% !important;
+                padding: 0 !important;
+            }
+
+            /* Adjust column layouts */
+            [data-testid="column"] {
+                width: 100% !important;
+                flex: 1 1 auto !important;
+                min-width: 0 !important;
+            }
+
+            /* Hide unnecessary elements */
+            .stButton,
+            button[kind="secondary"],
+            .stSpinner,
+            .stSelectbox,
+            .stDownloadButton {
+                display: none !important;
+            }
+
+            /* Ensure charts are visible */
+            .js-plotly-plot {
+                break-inside: avoid;
+                page-break-inside: avoid;
+                height: auto !important;
+                width: 100% !important;
+            }
+
+            /* Fix chart legends */
+            .legend {
+                display: block !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+            }
+
+            /* Ensure plotly SVG elements are visible */
+            svg.main-svg {
+                height: 400px !important;
+            }
+        }
         </style>
+
+        <script>
+            // Function to check if dark mode is enabled
+            function isDarkMode() {
+                return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            }
+
+            // Function to update chart text colors
+            function updateChartColors() {
+                const charts = document.querySelectorAll('.js-plotly-plot');
+                const textColor = isDarkMode() ? 'white' : 'black';
+
+                charts.forEach(chart => {
+                    const texts = chart.querySelectorAll('.legend text, .gtitle, .xtitle, .ytitle, .pie-label');
+                    texts.forEach(text => {
+                        text.style.fill = textColor;
+                    });
+                });
+            }
+
+            // Update colors initially and when theme changes
+            updateChartColors();
+            window.matchMedia('(prefers-color-scheme: dark)').addListener(updateChartColors);
+        </script>
     """,
                 unsafe_allow_html=True)
 
@@ -966,19 +1042,27 @@ def main():
                     "<b>%{label}</b><br>%{value:.2f} GB<br>%{percent}",
                     hole=0.4,
                     marker=dict(colors=['#2ecc71', '#3498db', '#e74c3c']),
-                    name=""  # This removes the trace_0 prefix
+                    name="",  # This removes the trace_0 prefix
                 )
             ])
-            fig.update_layout(showlegend=True,
-                              legend=dict(orientation="h",
-                                          yanchor="bottom",
-                                          y=1.02,
-                                          xanchor="right",
-                                          x=1),
-                              height=300,
-                              margin=dict(t=30, l=0, r=0, b=0),
-                              paper_bgcolor='rgba(0,0,0,0)',
-                              plot_bgcolor='rgba(0,0,0,0)')
+
+            fig.update_layout(
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=-0.2,
+                    xanchor="center",
+                    x=0.5,
+                    bgcolor='rgba(0,0,0,0)',  # Transparent background
+                    borderwidth=0,  # Remove border
+                    font=dict(size=14, )),
+                height=400,
+                margin=dict(t=30, l=0, r=0, b=80),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict()  # Global font color
+            )
             st.plotly_chart(fig, use_container_width=True)
 
         # Latency Summary
@@ -1020,6 +1104,7 @@ def main():
             comm_time = max(
                 0, fwd_total - (attn_time + mlp_time + ln_time +
                                 input_embed_time + output_embed_time))
+
             fig = go.Figure(data=[
                 go.Pie(
                     labels=[
@@ -1040,25 +1125,70 @@ def main():
                         '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22',
                         '#e74c3c'
                     ]),
-                    name=""  # This removes the trace_0 prefix
+                    name="",  # This removes the trace_0 prefix
                 )
             ])
-            fig.update_layout(showlegend=True,
-                              legend=dict(orientation="h",
-                                          yanchor="bottom",
-                                          y=1.02,
-                                          xanchor="right",
-                                          x=1),
-                              height=300,
-                              margin=dict(t=30, l=0, r=0, b=0),
-                              paper_bgcolor='rgba(0,0,0,0)',
-                              plot_bgcolor='rgba(0,0,0,0)')
+
+            fig.update_layout(
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=-0.2,
+                    xanchor="center",
+                    x=0.5,
+                    bgcolor='rgba(0,0,0,0)',  # Transparent background
+                    borderwidth=0,  # Remove border
+                    font=dict(size=14, )),
+                height=400,
+                margin=dict(t=30, l=0, r=0, b=80),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict()  # Global font color
+            )
             st.plotly_chart(fig, use_container_width=True)
 
     # Add debug window at the bottom
     st.divider()
     with st.expander("Debug Logs", expanded=False):
         st.text(log_output.getvalue())
+
+    show_print_button = """
+        <script>
+            function print_page(obj) {
+                obj.style.display = "none";
+
+                // Set optimal print settings
+                const style = document.createElement('style');
+                style.textContent = `
+                    @page {
+                        size: landscape;
+                        margin: 1cm;
+                    }
+                `;
+                document.head.appendChild(style);
+
+                // Wait for any charts to finish rendering
+                setTimeout(() => {
+                    parent.window.print();
+                    document.head.removeChild(style);
+                }, 500);
+            }
+        </script>
+        <button style="
+            padding: 0.5rem 1rem;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 1rem 0;
+            font-size: 1rem;
+        " onclick="print_page(this)">
+            Export to PDF (Landscape)
+        </button>
+        """
+    components.html(show_print_button)
 
 
 if __name__ == "__main__":
