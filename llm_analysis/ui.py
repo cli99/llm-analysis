@@ -17,8 +17,11 @@ from llm_analysis.constant import (INTER_NODE_MEMORY_EFFICIENCY,
 
 
 def main():
-
+    # This MUST be the first Streamlit command
     st.set_page_config(page_title="LLM Analysis", layout="wide")
+
+    # Now you can add the version info (after set_page_config)
+    st.write(f"Streamlit version: {st.__version__}")
 
     # Add custom CSS for print layout
     st.markdown("""
@@ -250,6 +253,10 @@ def main():
             st.session_state.master_weights_dtype = "FP32"
             st.session_state.mlp_activation_quant_bits = 8
 
+    # Add this to prevent script re-execution glitches
+    if "form_submitted" not in st.session_state:
+        st.session_state.form_submitted = False
+
     def update_gpu_config():
         """Callback to update GPU configuration when selection changes"""
         selected_name = st.session_state.gpu_type_select
@@ -313,208 +320,196 @@ def main():
     st.header("Training")
     st.divider()
 
-    # Model Configuration section
-    st.subheader("Model Architecture")
-    # Model configuration mode selection
-    config_mode = st.radio(
-        "Configuration Mode",
-        ["Load from HuggingFace", "Custom Configuration"],
-        help=
-        "Choose whether to load a model from HuggingFace or create a custom configuration",
-        horizontal=True)
-
-    if config_mode == "Load from HuggingFace":
-        col_name, col_button = st.columns([0.7, 0.3])
-        with col_name:
-            selected_model = st.text_input(
-                "HuggingFace Model Name",
-                "deepseek-ai/DeepSeek-V3",
-                help=
-                "e.g., deepseek-ai/DeepSeek-V3, meta-llama/Llama-3.3-70B-Instruct"
-            )
-        with col_button:
-            load_button = st.button("Load Model Configuration")
-
-        if load_button:
-            try:
-                model_config = get_model_config_by_name(selected_model)
-                st.success(
-                    f"Successfully loaded configuration for {selected_model}")
-                # Update session state with loaded config
-                st.session_state.model_name = model_config.name
-                st.session_state.hidden_dim = model_config.hidden_dim
-                st.session_state.n_head = model_config.n_head
-                st.session_state.num_layers = model_config.num_layers
-                st.session_state.vocab_size = model_config.vocab_size
-                st.session_state.expansion_ratio = model_config.expansion_ratio
-                st.session_state.mlp_gated_linear_units = model_config.mlp_gated_linear_units
-                st.session_state.moe_num_experts = model_config.moe_num_experts if model_config.moe_num_experts is not None else -1
-                st.session_state.moe_top_k = model_config.moe_top_k if model_config.moe_top_k is not None else -1
-                st.session_state.moe_intermediate_size = model_config.moe_intermediate_size if model_config.moe_intermediate_size is not None else -1
-                st.session_state.moe_num_shared_experts = model_config.moe_num_shared_experts if model_config.moe_num_shared_experts is not None else -1
-                st.session_state.num_key_value_heads = model_config.num_key_value_heads or model_config.n_head
-                st.session_state.num_key_value_groups = model_config.num_key_value_groups or 1
-                st.session_state.max_seq_len = model_config.max_seq_len or 4096
-                # Update MoE state after loading configuration
-                st.session_state.use_moe = st.session_state.moe_num_experts > 0
-                # Add new parameters
-                st.session_state.first_k_dense_replace = model_config.first_k_dense_replace if hasattr(
-                    model_config, 'first_k_dense_replace') else 3
-                st.session_state.q_lora_rank = model_config.q_lora_rank if hasattr(
-                    model_config, 'q_lora_rank') else 1536
-                st.session_state.kv_lora_rank = model_config.kv_lora_rank if hasattr(
-                    model_config, 'kv_lora_rank') else 512
-                st.session_state.qk_nope_head_dim = model_config.qk_nope_head_dim if hasattr(
-                    model_config, 'qk_nope_head_dim') else 128
-                st.session_state.qk_rope_head_dim = model_config.qk_rope_head_dim if hasattr(
-                    model_config, 'qk_rope_head_dim') else 64
-            except Exception as e:
-                st.error(f"Error loading model config: {str(e)}")
-
-    # Model configuration fields in two columns
-    config_col1, config_col2 = st.columns(2)
-    with config_col1:
-        st.session_state.model_name = st.text_input(
-            "Model Name", value=st.session_state.model_name)
-        st.session_state.hidden_dim = st.number_input(
-            "Hidden Dimension", value=st.session_state.hidden_dim, step=128)
-        ffn_embed_dim = st.number_input(
-            "FFN Dimension",
-            value=int(st.session_state.hidden_dim *
-                      st.session_state.expansion_ratio),
-            step=128,
-            help="Hidden dimension of feed-forward network")
-        # Update expansion ratio based on FFN dimension
-        st.session_state.expansion_ratio = ffn_embed_dim / st.session_state.hidden_dim
-
-        st.session_state.n_head = st.number_input(
-            "Number of Attention Heads",
-            value=st.session_state.n_head,
-            step=1,
-            help="Number of attention heads")
-        st.session_state.num_key_value_heads = st.number_input(
-            "Number of KV Heads",
-            min_value=1,
-            max_value=st.session_state.n_head,
-            value=st.session_state.num_key_value_heads,
-            step=1,
+    # Wrap your Model Architecture section in a form
+    with st.form(key="model_architecture_form"):
+        st.subheader("Model Architecture")
+        # Model configuration mode selection
+        config_mode = st.radio(
+            "Configuration Mode",
+            ["Load from HuggingFace", "Custom Configuration"],
             help=
-            "Number of key-value heads (must divide number of attention heads)"
-        )
+            "Choose whether to load a model from HuggingFace or create a custom configuration",
+            horizontal=True)
 
-    with config_col2:
-        if st.session_state.n_head % st.session_state.num_key_value_heads != 0:
-            st.error(
-                f"Number of attention heads ({st.session_state.n_head}) must be divisible by number of KV heads ({st.session_state.num_key_value_heads})"
+        # All your model architecture inputs here...
+        config_col1, config_col2 = st.columns(2)
+        with config_col1:
+            model_name = st.text_input("Model Name",
+                                       value=st.session_state.model_name,
+                                       help="Model name on HuggingFace")
+            hidden_dim = st.number_input(
+                "Hidden Dimension",
+                value=st.session_state.hidden_dim,
+                step=128,
+                help=
+                "Hidden dimension must be a multiple of the number of attention heads"
             )
-        st.session_state.num_key_value_groups = st.session_state.n_head // st.session_state.num_key_value_heads
+            ffn_embed_dim = st.number_input(
+                "FFN Dimension",
+                value=int(st.session_state.hidden_dim *
+                          st.session_state.expansion_ratio),
+                step=128,
+                help="Hidden dimension of feed-forward network")
+            n_head = st.number_input("Number of Attention Heads",
+                                     value=st.session_state.n_head,
+                                     step=4,
+                                     help="Number of attention heads")
+            num_key_value_heads = st.number_input(
+                "Number of KV Heads",
+                min_value=1,
+                max_value=st.session_state.n_head,
+                value=min(st.session_state.num_key_value_heads,
+                          st.session_state.n_head),
+                step=4,
+                help=
+                "Number of key-value heads (must be a factor of the number of attention heads)"
+            )
 
-        st.session_state.num_layers = st.number_input(
-            "Number of Layers",
-            value=st.session_state.num_layers,
-            step=1,
-            help="Number of transformer layers")
-        st.session_state.vocab_size = st.number_input(
-            "Vocabulary Size",
-            value=st.session_state.vocab_size,
-            step=1000,
-            help="Size of the vocabulary")
-        st.session_state.max_seq_len = st.number_input(
-            "Maximum Sequence Length",
-            value=st.session_state.max_seq_len,
-            step=128,
-            help="Maximum sequence length the model can handle")
-        st.session_state.mlp_gated_linear_units = st.checkbox(
-            "MLP Gated Linear Units",
-            value=st.session_state.mlp_gated_linear_units,
-            help="Use gated linear units in MLP layers")
-        st.session_state.use_moe = st.checkbox("Is Mixture of Experts (MoE)",
-                                               value=st.session_state.use_moe,
-                                               help="Is Mixture of Experts")
+        with config_col2:
+            # Other model inputs...
+            if st.session_state.n_head % st.session_state.num_key_value_heads != 0:
+                st.error(
+                    f"Number of attention heads ({st.session_state.n_head}) must be divisible by number of KV heads ({st.session_state.num_key_value_heads})"
+                )
+            st.session_state.num_key_value_groups = st.session_state.n_head // st.session_state.num_key_value_heads
 
-    # MoE Configuration (if enabled)
-    if st.session_state.use_moe:
-        st.markdown("##### Mixture of Experts (MoE) Configuration")
-        # MoE Configuration
-        moe_col1, moe_col2 = st.columns(2)
-        with moe_col1:
-            st.session_state.moe_num_experts = st.number_input(
-                "Number of Experts",
-                min_value=1,
-                value=max(1, st.session_state.moe_num_experts),
+            st.session_state.num_layers = st.number_input(
+                "Number of Layers",
+                value=st.session_state.num_layers,
                 step=1,
-                help="Total number of experts")
-            st.session_state.moe_top_k = st.number_input(
-                "Top-K Experts",
-                min_value=1,
-                max_value=st.session_state.moe_num_experts,
-                value=max(
-                    1,
-                    min(st.session_state.moe_top_k,
-                        st.session_state.moe_num_experts)),
-                step=1,
-                help="Number of experts to route each token to")
-            st.session_state.first_k_dense_replace = st.number_input(
-                "First K Dense Replace",
-                value=st.session_state.first_k_dense_replace
-                if st.session_state.first_k_dense_replace is not None else 3,
-                min_value=0,
-                step=1,
-                help="Number of initial layers to replace with dense layers")
-            st.session_state.q_lora_rank = st.number_input(
-                "Q LoRA Rank",
-                value=st.session_state.q_lora_rank
-                if st.session_state.q_lora_rank is not None else 1536,
-                min_value=1,
+                help="Number of transformer layers")
+            st.session_state.vocab_size = st.number_input(
+                "Vocabulary Size",
+                value=st.session_state.vocab_size,
+                step=1000,
+                help="Size of the vocabulary")
+            st.session_state.max_seq_len = st.number_input(
+                "Maximum Sequence Length",
+                value=st.session_state.max_seq_len,
                 step=128,
-                help="Rank for Q LoRA adaptation")
-            st.session_state.kv_lora_rank = st.number_input(
-                "KV LoRA Rank",
-                value=st.session_state.kv_lora_rank
-                if st.session_state.kv_lora_rank is not None else 512,
-                min_value=1,
-                step=128,
-                help="Rank for KV LoRA adaptation")
-        with moe_col2:
-            st.session_state.moe_num_shared_experts = st.number_input(
-                "Number of Shared Experts",
-                min_value=0,
-                value=max(0, st.session_state.moe_num_shared_experts),
-                step=1,
-                help="Number of experts shared across all groups")
-            st.session_state.moe_intermediate_size = st.number_input(
-                "MoE Intermediate Size",
-                min_value=0,
-                value=max(0, st.session_state.moe_intermediate_size) if
-                st.session_state.moe_intermediate_size > 0 else ffn_embed_dim,
-                step=128,
-                help="Intermediate size for MoE layers")
-            st.session_state.qk_nope_head_dim = st.number_input(
-                "QK NoPE Head Dimension",
-                value=st.session_state.qk_nope_head_dim
-                if st.session_state.qk_nope_head_dim is not None else 128,
-                min_value=1,
-                step=32,
-                help="Head dimension for QK without positional encoding")
-            st.session_state.qk_rope_head_dim = st.number_input(
-                "QK RoPE Head Dimension",
-                value=st.session_state.qk_rope_head_dim
-                if st.session_state.qk_rope_head_dim is not None else 64,
-                min_value=1,
-                step=32,
-                help="Head dimension for QK with rotary positional encoding")
-    else:
-        # Reset MoE parameters when disabled
-        st.session_state.moe_num_experts = -1
-        st.session_state.moe_top_k = -1
-        st.session_state.moe_num_shared_experts = -1
-        st.session_state.moe_intermediate_size = -1
-        # Reset advanced MoE parameters to None
-        st.session_state.first_k_dense_replace = None
-        st.session_state.q_lora_rank = None
-        st.session_state.kv_lora_rank = None
-        st.session_state.qk_nope_head_dim = None
-        st.session_state.qk_rope_head_dim = None
+                help="Maximum sequence length the model can handle")
+            st.session_state.mlp_gated_linear_units = st.checkbox(
+                "MLP Gated Linear Units",
+                value=st.session_state.mlp_gated_linear_units,
+                help="Use gated linear units in MLP layers")
+            st.session_state.use_moe = st.checkbox(
+                "Is Mixture of Experts (MoE)",
+                value=st.session_state.use_moe,
+                help="Is Mixture of Experts")
+
+        # MoE configuration if enabled...
+        if st.session_state.use_moe:
+            st.markdown("##### Mixture of Experts (MoE) Configuration")
+            # MoE Configuration
+            moe_col1, moe_col2 = st.columns(2)
+            with moe_col1:
+                st.session_state.moe_num_experts = st.number_input(
+                    "Number of Experts",
+                    min_value=1,
+                    value=max(1, st.session_state.moe_num_experts),
+                    step=1,
+                    help="Total number of experts")
+                st.session_state.moe_top_k = st.number_input(
+                    "Top-K Experts",
+                    min_value=1,
+                    max_value=st.session_state.moe_num_experts,
+                    value=max(
+                        1,
+                        min(st.session_state.moe_top_k,
+                            st.session_state.moe_num_experts)),
+                    step=1,
+                    help="Number of experts to route each token to")
+                st.session_state.first_k_dense_replace = st.number_input(
+                    "First K Dense Replace",
+                    value=st.session_state.first_k_dense_replace if
+                    st.session_state.first_k_dense_replace is not None else 3,
+                    min_value=0,
+                    step=1,
+                    help="Number of initial layers to replace with dense layers"
+                )
+                st.session_state.q_lora_rank = st.number_input(
+                    "Q LoRA Rank",
+                    value=st.session_state.q_lora_rank
+                    if st.session_state.q_lora_rank is not None else 1536,
+                    min_value=1,
+                    step=128,
+                    help="Rank for Q LoRA adaptation")
+                st.session_state.kv_lora_rank = st.number_input(
+                    "KV LoRA Rank",
+                    value=st.session_state.kv_lora_rank
+                    if st.session_state.kv_lora_rank is not None else 512,
+                    min_value=1,
+                    step=128,
+                    help="Rank for KV LoRA adaptation")
+            with moe_col2:
+                st.session_state.moe_num_shared_experts = st.number_input(
+                    "Number of Shared Experts",
+                    min_value=0,
+                    value=max(0, st.session_state.moe_num_shared_experts),
+                    step=1,
+                    help="Number of experts shared across all groups")
+                st.session_state.moe_intermediate_size = st.number_input(
+                    "MoE Intermediate Size",
+                    min_value=0,
+                    value=max(0, st.session_state.moe_intermediate_size)
+                    if st.session_state.moe_intermediate_size > 0 else
+                    ffn_embed_dim,
+                    step=128,
+                    help="Intermediate size for MoE layers")
+                st.session_state.qk_nope_head_dim = st.number_input(
+                    "QK NoPE Head Dimension",
+                    value=st.session_state.qk_nope_head_dim
+                    if st.session_state.qk_nope_head_dim is not None else 128,
+                    min_value=1,
+                    step=32,
+                    help="Head dimension for QK without positional encoding")
+                st.session_state.qk_rope_head_dim = st.number_input(
+                    "QK RoPE Head Dimension",
+                    value=st.session_state.qk_rope_head_dim
+                    if st.session_state.qk_rope_head_dim is not None else 64,
+                    min_value=1,
+                    step=32,
+                    help="Head dimension for QK with rotary positional encoding"
+                )
+        else:
+            # Reset MoE parameters when disabled
+            st.session_state.moe_num_experts = -1
+            st.session_state.moe_top_k = -1
+            st.session_state.moe_num_shared_experts = -1
+            st.session_state.moe_intermediate_size = -1
+            # Reset advanced MoE parameters to None
+            st.session_state.first_k_dense_replace = None
+            st.session_state.q_lora_rank = None
+            st.session_state.kv_lora_rank = None
+            st.session_state.qk_nope_head_dim = None
+            st.session_state.qk_rope_head_dim = None
+
+        # Form submission button
+        submit_button = st.form_submit_button(
+            label="Update Model Configuration")
+
+        if submit_button:
+            # Validate that hidden_dim is divisible by n_head
+            if hidden_dim % n_head != 0:
+                st.error(
+                    f"Error: Hiddenn dimension ({hidden_dim}) must be a multiple of the number of attention heads ({n_head})."
+                )
+            else:
+                # Only update the session state if validation passes
+                st.session_state.model_name = model_name
+                st.session_state.hidden_dim = hidden_dim
+                # Calculate expansion ratio
+                st.session_state.expansion_ratio = ffn_embed_dim / hidden_dim
+                st.session_state.n_head = n_head
+                st.session_state.num_key_value_heads = num_key_value_heads
+                # Update the rest of your session state variables similarly
+                st.session_state.form_submitted = True
+
+    # If the form was just submitted, provide feedback
+    if st.session_state.form_submitted:
+        st.success("Model configuration updated successfully!")
+        # Reset the flag so the message doesn't persist on future reruns
+        st.session_state.form_submitted = False
 
     # Create a row for Data Type, Hardware, and Parallelism configurations
     st.divider()
